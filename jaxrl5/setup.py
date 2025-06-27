@@ -17,7 +17,7 @@ def read_requirements_file(filename):
 description = "Implementations of Reinforcement Learning algorithms in Jax."
 
 install_requires = read_requirements_file("requirements.txt")
-test_requires = read_requirements_file("requirements_test.txt")
+#test_requires = read_requirements_file("requirements_test.txt")
 train_requires = read_requirements_file("requirements_train.txt")
 
 setup(
@@ -42,9 +42,9 @@ setup(
     keywords="reinforcement, machine, learning, research",
     packages=find_packages(),
     install_requires=install_requires,
-    test_requires=test_requires,
+    #test_requires=test_requires,
     extras_require={
-        "test": test_requires,
+        #"test": test_requires,
         "train": train_requires,
     },
     license="MIT",

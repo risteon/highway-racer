@@ -84,7 +84,7 @@ class TanhSquasher(nn.Module):
 
 @partial(jax.jit, static_argnames=("actor_apply_fn", "limits_apply_fn"))
 def _sample_actions(
-    rng: jax.random.KeyArray,
+    rng: jax.Array,
     actor_apply_fn,
     limits_apply_fn,
     actor_params,
@@ -92,7 +92,7 @@ def _sample_actions(
     observations: jax.Array,
     output_range: Optional[Tuple[jax.Array, jax.Array]] = None,
     **kwargs,
-) -> Tuple[jax.Array, jax.random.KeyArray]:
+) -> Tuple[jax.Array, jax.Array]:
     key, rng = jax.random.split(rng)
     dist = actor_apply_fn({"params": actor_params}, observations, **kwargs)
     dist: distrax.Distribution = limits_apply_fn({"params": limits_params}, dist, output_range=output_range)
@@ -150,7 +150,7 @@ def update_distributional_critic(
     actor: TrainState,
     limits: TrainState,
     batch: DatasetDict,
-    rng: jax.random.KeyArray,
+    rng: jax.Array,
     num_qs: int,
     tau: float,
     discount: float,
@@ -251,7 +251,7 @@ def update_distributional_critic(
     num_atoms = target_q_probs.shape[-1]
 
     # Compute target Q-values
-    def loss(critic_params, rng: jax.random.KeyArray):
+    def loss(critic_params, rng: jax.Array):
         rng, key = jax.random.split(rng)
         qs_logits, qs_atoms = critic.apply_fn(
             {"params": critic_params},
@@ -329,7 +329,7 @@ def update_distributional_actor(
     critic: TrainState,
     limits: TrainState,
     batch: DatasetDict,
-    rng: jax.random.KeyArray,
+    rng: jax.Array,
     temperature: float,
     cvar_risk: float,
     output_range: Optional[Tuple[jax.Array, jax.Array]] = None,
@@ -383,7 +383,7 @@ def update_distributional_limits(
     critic: TrainState,
     limits: TrainState,
     batch: DatasetDict,
-    rng: jax.random.KeyArray,
+    rng: jax.Array,
     temperature: float,
     cvar_risk: float,
     learned_action_space_idx: int,
@@ -446,7 +446,7 @@ class DistributionalSACLearner(Agent):
     independent_ensemble: bool = struct.field(pytree_node=False)
     backup_entropy: bool = struct.field(pytree_node=False)
     initialize_params: Callable[
-        [jax.random.KeyArray], Dict[str, TrainState]
+        [jax.Array], Dict[str, TrainState]
     ] = struct.field(pytree_node=False)
 
     num_atoms: int = struct.field(pytree_node=False)
@@ -555,7 +555,7 @@ class DistributionalSACLearner(Agent):
         do_update_limits = learned_action_space_idx is not None
 
         # Initialize parameters
-        def make_train_states(rng: jax.random.KeyArray) -> Dict[str, TrainState]:
+        def make_train_states(rng: jax.Array) -> Dict[str, TrainState]:
             rngs = jax.random.split(rng, 5)
             actor_params = actor_def.init(rngs[0], observations)["params"]
             critic_params = critic_def.init(rngs[1], observations, actions)["params"]

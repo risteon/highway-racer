@@ -65,7 +65,7 @@ def update_gaussian_distributional_critic(
     target_critic: TrainState,
     actor: TrainState,
     batch: DatasetDict,
-    rng: jax.random.KeyArray,
+    rng: jax.Array,
     num_qs: int,
     tau: float,
     discount: float,
@@ -104,7 +104,7 @@ def update_gaussian_distributional_critic(
     chex.assert_shape([target_q_mean, target_q_std], (num_qs, batch_size))
 
     # Compute target Q-values
-    def loss(critic_params, rng: jax.random.KeyArray):
+    def loss(critic_params, rng: jax.Array):
         rng, key = jax.random.split(rng)
         qs_mean, qs_std = critic.apply_fn(
             {"params": critic_params},
@@ -147,7 +147,7 @@ def update_gaussian_distributional_actor(
     actor: TrainState,
     critic: TrainState,
     batch: DatasetDict,
-    rng: jax.random.KeyArray,
+    rng: jax.Array,
     temperature: float,
 ):
     batch_size = batch["rewards"].shape[0]
@@ -199,7 +199,7 @@ class GaussianDistributionalSACLearner(Agent):
     )  # See M in RedQ https://arxiv.org/abs/2101.05982
     backup_entropy: bool = struct.field(pytree_node=False)
     initialize_params: Callable[
-        [jax.random.KeyArray], Dict[str, TrainState]
+        [jax.Array], Dict[str, TrainState]
     ] = struct.field(pytree_node=False)
 
 
@@ -264,7 +264,7 @@ class GaussianDistributionalSACLearner(Agent):
         temp_def = Temperature(init_temperature)
 
         # Initialize parameters
-        def make_train_states(rng: jax.random.KeyArray) -> Dict[str, TrainState]:
+        def make_train_states(rng: jax.Array) -> Dict[str, TrainState]:
             rngs = jax.random.split(rng, 5)
             actor_params = actor_def.init(rngs[0], observations)["params"]
             critic_params = critic_def.init(rngs[1], observations, actions)["params"]

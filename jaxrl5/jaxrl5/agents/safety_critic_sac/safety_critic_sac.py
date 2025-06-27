@@ -63,7 +63,7 @@ class SafetyCriticSACLearner(Agent):
     )  # See M in RedQ https://arxiv.org/abs/2101.05982
     backup_entropy: bool = struct.field(pytree_node=False)
     initialize_params: Callable[
-        [jax.random.KeyArray], Dict[str, TrainState]
+        [jax.Array], Dict[str, TrainState]
     ] = struct.field(pytree_node=False)
     pixel_embeddings_key: Optional[str] = struct.field(pytree_node=False)
 
@@ -143,7 +143,7 @@ class SafetyCriticSACLearner(Agent):
         temp_def = Temperature(init_temperature)
 
         # Initialize parameters
-        def make_train_states(rng: jax.random.KeyArray) -> Dict[str, TrainState]:
+        def make_train_states(rng: jax.Array) -> Dict[str, TrainState]:
             rngs = jax.random.split(rng, 4)
             actor_params = actor_def.init(rngs[0], observations)["params"]
             critic_params = critic_def.init(rngs[1], observations, actions)["params"]

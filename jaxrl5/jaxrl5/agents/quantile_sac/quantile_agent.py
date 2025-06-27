@@ -53,7 +53,7 @@ def update_quantile_critic(
         target_critic: TrainState,
         actor: TrainState,
         batch: DatasetDict,
-        rng: jax.random.KeyArray,
+        rng: jax.Array,
         num_qs: int,
         tau: float,
         discount: float,
@@ -146,7 +146,7 @@ def update_quantile_actor(
         actor: TrainState,
         critic: TrainState,
         batch: DatasetDict,
-        rng: jax.random.KeyArray,
+        rng: jax.Array,
         temperature: float,
         cvar_risk: float,
         output_range: Optional[Tuple[jax.Array, jax.Array]],
@@ -193,7 +193,7 @@ class QuantileSACLearner(Agent):
     )  # See M in RedQ https://arxiv.org/abs/2101.05982
     independent_ensemble: bool = struct.field(pytree_node=False)
     backup_entropy: bool = struct.field(pytree_node=False)
-    initialize_params: Callable[[jax.random.KeyArray], Dict[str, TrainState]] = struct.field(pytree_node=False)
+    initialize_params: Callable[[jax.Array], Dict[str, TrainState]] = struct.field(pytree_node=False)
 
     num_quantiles: int = struct.field(pytree_node=False)
     cvar_risk: float = struct.field(pytree_node=False)
@@ -254,7 +254,7 @@ class QuantileSACLearner(Agent):
         temp_def = Temperature(init_temperature)
 
         # Initialize parameters
-        def make_train_states(rng: jax.random.KeyArray) -> Dict[str, TrainState]:
+        def make_train_states(rng: jax.Array) -> Dict[str, TrainState]:
             rngs = jax.random.split(rng, 3)
             actor_params = actor_def.init(rngs[0], observations)["params"]
             critic_params = critic_def.init(rngs[1], observations, actions)["params"]

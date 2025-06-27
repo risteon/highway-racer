@@ -28,7 +28,7 @@ def _sample_element(
     sampled_idx: jax.Array,
     ep_begin: jax.Array,
     ep_end: jax.Array,
-    key: jax.random.KeyArray,
+    key: jax.Array,
 ) -> jnp.ndarray:
     """
     Sample from the data according to the config.
@@ -135,7 +135,7 @@ def make_jit_sample(sample_config: dict, device: jax.Device, sample_range: Tuple
     def _sample_impl(
         dataset: jax.Array,
         metadata: Dict[str, jax.Array],
-        rng: jax.random.KeyArray,
+        rng: jax.Array,
         batch_size: int,
         sample_begin_idx: int,
         sample_end_idx: int,
