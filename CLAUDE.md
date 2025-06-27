@@ -177,7 +177,7 @@ r = velocities_to_goal
 ### Main Training Script
 **File**: `scripts/sim/train_online_states.py`
 
-**Working Training Command**:
+**Working Training Command (MuJoCo/Procedural)**:
 ```bash
 cd /home/risteon/workspace/gpudrive_docker/racer && \
 source /home/risteon/miniconda3/bin/activate racer && \
@@ -185,6 +185,40 @@ DISPLAY=:0 WANDB_MODE=offline python scripts/sim/train_online_states.py \
   --config scripts/sim/configs/distributional_limits_config.py \
   --world_name flat
 ```
+
+### Highway-Env Integration
+**Training Command for Highway-Env**:
+```bash
+cd /home/risteon/workspace/gpudrive_docker/racer && \
+source /home/risteon/miniconda3/bin/activate racer && \
+DISPLAY=:0 WANDB_MODE=offline python scripts/sim/train_highway_states.py \
+  --config scripts/sim/configs/highway_distributional_config.py \
+  --max_steps 100000
+```
+
+**Key Differences from MuJoCo Training**:
+- Uses `gymnasium` instead of `gym` for highway-env compatibility
+- Implements collision risk safety reward based on inter-vehicle distances
+- Flattened observation space (90D) from 15 vehicles × 6 features each
+- Continuous action space (2D): [steering, acceleration]
+
+**Highway-Env Setup**:
+- **Environment**: `highway-v0` with continuous action space
+- **Observation**: Kinematics data for 15 vehicles (presence, x, y, vx, vy, heading)
+- **Safety Metric**: Collision risk based on minimum distance to other vehicles
+- **Risk Parameters**: 
+  - `collision_threshold = 2.0m` (imminent collision penalty)
+  - `safety_threshold = 10.0m` (safe following distance)
+- **Reward**: Base highway reward + collision risk penalty (exponential decay)
+
+**Implementation Files**:
+- **Main Script**: `scripts/sim/train_highway_states.py`
+- **Configuration**: `scripts/sim/configs/highway_distributional_config.py`
+- **Key Features**:
+  - Collision risk safety reward function
+  - Gymnasium compatibility wrapper
+  - Bounded observation space for replay buffer compatibility
+  - Speed and safety EMA tracking for logging
 
 **Command Components**:
 - `source /home/risteon/miniconda3/bin/activate racer` - Activate racer conda environment
