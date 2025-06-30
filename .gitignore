@@ -3,3 +3,4 @@
 wandb/
 offroad-robot-ros/data
 policies/
+evaluation_*/
