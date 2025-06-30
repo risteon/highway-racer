@@ -52,7 +52,7 @@ warnings.filterwarnings("ignore")
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("env_name", "highway-v0", "Highway environment name.")
+flags.DEFINE_string("env_name", "highway-fast-v0", "Highway environment name.")
 flags.DEFINE_string("wandb_project", "highway_racer", "Project for W&B")
 flags.DEFINE_string("comment", "", "Comment for W&B")
 flags.DEFINE_string("save_dir", "./tmp/", "Tensorboard logging dir.")
@@ -256,7 +256,7 @@ def main(_):
         )
 
     env = FlattenObservation(env)  # Flatten (15, 6) -> (90,)
-    env = BoundObservationWrapper(env)  # Bound infinite obs space
+    # env = BoundObservationWrapper(env)  # Bound infinite obs space
     env = TimeLimit(env, max_episode_steps=1000)
     env = RecordEpisodeStatistics(env)
 
