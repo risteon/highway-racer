@@ -74,6 +74,11 @@ flags.DEFINE_boolean("save_video", False, "Save videos during evaluation.")
 flags.DEFINE_boolean("record_video", False, "Record videos during training.")
 flags.DEFINE_boolean("save_buffer", False, "Save the replay buffer.")
 flags.DEFINE_integer("save_buffer_interval", 50000, "Save buffer interval.")
+flags.DEFINE_integer(
+    "save_checkpoint_interval", 2500, "Steps between saving checkpoints."
+)
+flags.DEFINE_string("checkpoint_dir", "policies", "Directory to save checkpoints.")
+flags.DEFINE_integer("keep_checkpoints", 10, "Number of checkpoints to keep.")
 flags.DEFINE_integer("utd_ratio", 8, "Updates per data point")
 flags.DEFINE_integer(
     "reset_interval",
@@ -187,21 +192,13 @@ def evaluate(
 ):
     episode_returns = []
     episode_lengths = []
-    episode_videos = []
 
     for i in range(num_episodes):
         images, episode_return, episode_length = run_trajectory(
-            agent, eval_env, video=i < 4, output_range=output_range
+            agent, eval_env, video=False, output_range=output_range
         )
         episode_returns.append(episode_return)
         episode_lengths.append(episode_length)
-        if i < 4:
-            episode_videos.append(images)
-
-    max_video_length = max([len(v) for v in episode_videos])
-    episode_videos = [
-        np.stack(v + [v[-1]] * (max_video_length - len(v))) for v in episode_videos
-    ]
 
     wandb.log(
         {
@@ -209,9 +206,6 @@ def evaluate(
             "evaluation/episode_return": np.mean(episode_returns),
             "evaluation/episode_length_histogram": wandb.Histogram(episode_lengths),
             "evaluation/episode_length": np.mean(episode_lengths),
-            "evaluation/videos": wandb.Video(
-                np.stack(episode_videos), fps=10, format="mp4"
-            ),
         }
     )
 
@@ -462,6 +456,33 @@ def main(_):
 
         if i % FLAGS.eval_interval == 0:
             evaluate(agent, eval_env, FLAGS.eval_episodes, output_range=output_range)
+
+        # Save checkpoints at specified intervals
+        if i % FLAGS.save_checkpoint_interval == 0 or i == 100:
+            try:
+                # Handle case where wandb.run.name might be None (offline mode)
+                run_name = wandb.run.name if wandb.run.name is not None else f"highway_run_{FLAGS.seed}"
+                policy_folder = os.path.abspath(os.path.join(FLAGS.checkpoint_dir, run_name))
+                os.makedirs(policy_folder, exist_ok=True)
+
+                param_dict = {
+                    "actor": agent.actor,
+                    "critic": agent.critic,
+                    "target_critic_params": agent.target_critic,
+                    "temp": agent.temp,
+                    "rng": agent.rng,
+                }
+                if hasattr(agent, "limits"):
+                    param_dict["limits"] = agent.limits
+                if hasattr(agent, "q_entropy_lagrange"):
+                    param_dict["q_entropy_lagrange"] = agent.q_entropy_lagrange
+
+                checkpoints.save_checkpoint(
+                    policy_folder, param_dict, step=i, keep=FLAGS.keep_checkpoints
+                )
+                print(f"Saved checkpoint at step {i} to {policy_folder}")
+            except Exception as e:
+                print(f"Cannot save checkpoints: {e}")
 
         pbar.set_description(
             f"Step {i}, Return: {reward:.2f}, Speed EMA: {speed_ema:.2f}, Safety EMA: {safety_ema:.2f}"
