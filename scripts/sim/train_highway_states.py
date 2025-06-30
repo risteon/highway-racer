@@ -16,18 +16,18 @@ import gym as old_gym  # Import old gym for spaces compatibility
 import numpy as np
 
 
-class BoundObservationWrapper(gym.Wrapper):
-    """Wrapper to bound infinite observation spaces for replay buffer compatibility."""
+# class BoundObservationWrapper(gym.Wrapper):
+#     """Wrapper to bound infinite observation spaces for replay buffer compatibility."""
 
-    def __init__(self, env, obs_low=-100.0, obs_high=100.0):
-        super().__init__(env)
-        # Bound the observation space using old gym for compatibility
-        self.observation_space = old_gym.spaces.Box(
-            low=obs_low,
-            high=obs_high,
-            shape=env.observation_space.shape,
-            dtype=env.observation_space.dtype,
-        )
+#     def __init__(self, env, obs_low=-100.0, obs_high=100.0):
+#         super().__init__(env)
+#         # Bound the observation space using old gym for compatibility
+#         self.observation_space = old_gym.spaces.Box(
+#             low=obs_low,
+#             high=obs_high,
+#             shape=env.observation_space.shape,
+#             dtype=env.observation_space.dtype,
+#         )
 
 
 import tqdm
@@ -60,9 +60,9 @@ flags.DEFINE_string(
     "expert_replay_buffer", "", "(Optional) Expert replay buffer pickle file."
 )
 flags.DEFINE_integer("seed", 42, "Random seed.")
-flags.DEFINE_integer("eval_episodes", 16, "Number of episodes used for evaluation.")
-flags.DEFINE_integer("log_interval", 100, "Logging interval.")
-flags.DEFINE_integer("eval_interval", 10000, "Eval interval.")
+flags.DEFINE_integer("eval_episodes", 32, "Number of episodes used for evaluation.")
+flags.DEFINE_integer("log_interval", 250, "Logging interval.")
+flags.DEFINE_integer("eval_interval", 5000, "Eval interval.")
 flags.DEFINE_integer("batch_size", 128, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
@@ -166,7 +166,7 @@ def run_trajectory(
 
     for _ in range(max_steps):
         if video:
-            images.append(env.render(mode="rgb_array"))
+            images.append(env.render())
 
         action, agent = agent.sample_actions(obs, output_range=output_range)
         next_obs, reward, done, truncated, info = env.step(action)
@@ -241,8 +241,8 @@ def main(_):
     }
 
     # Set render mode if video recording is enabled
-    render_mode = "rgb_array" if FLAGS.record_video else None
-    env = gym.make(FLAGS.env_name, config=highway_config, render_mode=render_mode)
+    # render_mode = "rgb_array" if FLAGS.record_video else None
+    env = gym.make(FLAGS.env_name, config=highway_config, render_mode=None)
 
     # Add video recording wrapper if requested
     if FLAGS.record_video:
@@ -260,19 +260,19 @@ def main(_):
     env = TimeLimit(env, max_episode_steps=1000)
     env = RecordEpisodeStatistics(env)
 
-    eval_env = gym.make(FLAGS.env_name, config=highway_config, render_mode=render_mode)
+    eval_env = gym.make(FLAGS.env_name, config=highway_config, render_mode="rgb_array")
 
     # Add video recording wrapper for evaluation if requested
-    if FLAGS.record_video:
-        eval_env = RecordVideo(
-            eval_env,
-            video_folder=video_dir,
-            episode_trigger=lambda x: True,  # Record all evaluation episodes
-            name_prefix="highway_evaluation",
-        )
+    # if FLAGS.record_video:
+    #     eval_env = RecordVideo(
+    #         eval_env,
+    #         video_folder=video_dir,
+    #         episode_trigger=lambda x: True,  # Record all evaluation episodes
+    #         name_prefix="highway_evaluation",
+    #     )
 
     eval_env = FlattenObservation(eval_env)  # Flatten (15, 6) -> (90,)
-    eval_env = BoundObservationWrapper(eval_env)  # Bound infinite obs space
+    # eval_env = BoundObservationWrapper(eval_env)  # Bound infinite obs space
     eval_env = TimeLimit(eval_env, max_episode_steps=1000)
 
     kwargs = dict(FLAGS.config)
