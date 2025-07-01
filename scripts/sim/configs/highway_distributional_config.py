@@ -53,4 +53,7 @@ def get_config():
     # config.safety_penalty = 0.1  # Moderate safety bonus coefficient
     config.safety_penalty = 0.01  # Small safety bonus coefficient
 
+    # Offroad termination settings
+    config.max_offroad_steps = 20  # Terminate episode after 20 consecutive offroad steps
+
     return config

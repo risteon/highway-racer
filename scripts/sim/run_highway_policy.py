@@ -144,7 +144,7 @@ def load_highway_agent(
 
 
 def run_highway_trajectory(
-    agent, env: gym.Env, max_steps=1000, render_video=False, safety_bonus_coeff=0.01
+    agent, env: gym.Env, max_steps=1000, render_video=False, safety_bonus_coeff=0.01, max_offroad_steps=20
 ):
     """
     Run a single highway trajectory with the agent and collect metrics.
@@ -164,6 +164,10 @@ def run_highway_trajectory(
     offroad_violations = 0
     offroad_durations = []
     current_offroad_duration = 0
+    
+    # Offroad termination tracking
+    offroad_step_counter = 0
+    offroad_terminated = False
 
     # safety_bonus_coeff passed as parameter from checkpoint config or FLAGS
 
@@ -263,10 +267,17 @@ def run_highway_trajectory(
         if is_offroad:
             offroad_violations += 1
             current_offroad_duration += 1
+            # Check for offroad termination
+            offroad_step_counter += 1
+            if offroad_step_counter >= max_offroad_steps:
+                done = True
+                offroad_terminated = True
         else:
             if current_offroad_duration > 0:
                 offroad_durations.append(current_offroad_duration)
                 current_offroad_duration = 0
+            # Reset offroad step counter when back on road
+            offroad_step_counter = 0
 
         # Track minimum distance to other vehicles
         obs_reshaped = obs.reshape(15, 6)
@@ -323,6 +334,7 @@ def run_highway_trajectory(
         "offroad_violation_rate": offroad_violation_rate,
         "avg_offroad_duration": avg_offroad_duration,
         "total_offroad_steps": int(offroad_violations),
+        "offroad_terminated": bool(offroad_terminated),
     }
 
     return images, trajectory_metrics
@@ -335,6 +347,7 @@ def evaluate_highway_policy(
     render_video=False,
     max_steps=1000,
     safety_bonus_coeff=0.01,
+    max_offroad_steps=20,
 ):
     """
     Evaluate highway policy over multiple episodes and aggregate results.
@@ -351,6 +364,7 @@ def evaluate_highway_policy(
             max_steps=max_steps,
             render_video=render_video,
             safety_bonus_coeff=safety_bonus_coeff,
+            max_offroad_steps=max_offroad_steps,
         )
 
         metrics["episode_id"] = episode
@@ -369,6 +383,7 @@ def evaluate_highway_policy(
     offroad_rates = [m["offroad_violation_rate"] for m in all_metrics]
     offroad_durations = [m["avg_offroad_duration"] for m in all_metrics]
     total_offroad_steps = [m["total_offroad_steps"] for m in all_metrics]
+    offroad_terminations = [m["offroad_terminated"] for m in all_metrics]
 
     summary_stats = {
         "num_episodes": int(num_episodes),
@@ -387,6 +402,7 @@ def evaluate_highway_policy(
         "offroad_episode_rate": float(
             np.mean([1.0 if rate > 0 else 0.0 for rate in offroad_rates])
         ),
+        "offroad_termination_rate": float(np.mean(offroad_terminations)),
     }
 
     return all_metrics, summary_stats, all_videos
@@ -424,6 +440,7 @@ def main(_):
     model_cls = kwargs.pop("model_cls")
     kwargs.pop("group_name", None)  # Remove group_name before passing to agent
     kwargs.pop("safety_penalty", None)  # Remove safety_penalty if present
+    kwargs.pop("max_offroad_steps", None)  # Remove max_offroad_steps before passing to agent
 
     agent = globals()[model_cls].create(
         FLAGS.seed, env.observation_space, env.action_space, **kwargs
@@ -439,9 +456,11 @@ def main(_):
         print("Using config from checkpoint")
         # Extract safety_penalty from checkpoint config for evaluation
         safety_bonus_coeff = checkpoint_config.get("safety_penalty", 0.01)
+        max_offroad_steps = checkpoint_config.get("max_offroad_steps", 20)
     else:
         print("Using config from command line flags")
         safety_bonus_coeff = FLAGS.config.get("safety_penalty", 0.01)
+        max_offroad_steps = FLAGS.config.get("max_offroad_steps", 20)
 
     # Create output directory
     Path(FLAGS.video_output_dir).mkdir(parents=True, exist_ok=True)
@@ -454,6 +473,7 @@ def main(_):
         render_video=FLAGS.render,
         max_steps=FLAGS.max_steps,
         safety_bonus_coeff=safety_bonus_coeff,
+        max_offroad_steps=max_offroad_steps,
     )
 
     # Print summary statistics
@@ -483,6 +503,7 @@ def main(_):
     print(f"Offroad Episode Rate: {summary_stats['offroad_episode_rate']:.1%}")
     print(f"Mean Offroad Duration: {summary_stats['mean_offroad_duration']:.1f} steps")
     print(f"Total Offroad Steps: {summary_stats['total_offroad_steps_all_episodes']}")
+    print(f"Offroad Termination Rate: {summary_stats['offroad_termination_rate']:.1%}")
 
     # Save metrics to JSON
     if FLAGS.save_metrics:
