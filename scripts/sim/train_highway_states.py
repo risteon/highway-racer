@@ -280,6 +280,8 @@ def main(_):
     # offroad_step_counter = 0
     # max_offroad_steps = FLAGS.config.get("max_offroad_steps", 20)
     offroad_terminations = 0
+    # total collisions during training
+    collision_counter = 0
 
     ema_beta = 3e-4
 
@@ -334,6 +336,8 @@ def main(_):
         # Check for collision from highway-env reward components
         collision_occurred = info["rewards"]["collision_reward"] < 0.0
         collision_indicator = 1.0 if collision_occurred else 0.0
+        if collision_occurred:
+            collision_counter += 1
 
         # TODO(risteon) using standard env termination
         # Check for offroad status and update counter
@@ -530,6 +534,7 @@ def main(_):
             wandb_log["safety_ema"] = safety_ema
             wandb_log["collision_ema"] = collision_ema
             wandb_log["offroad_terminations"] = offroad_terminations
+            wandb_log["collision_counter"] = collision_counter
             if wandb_log:
                 wandb.log(wandb_log, step=i)
 
