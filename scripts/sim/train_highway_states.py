@@ -196,35 +196,11 @@ def main(_):
 
     # Apply RecordEpisodeStatistics FIRST to ensure episode info propagation
     env = RecordEpisodeStatistics(env)
-
-    # Add video recording wrapper if requested
-    if FLAGS.record_video:
-        video_dir = f"{FLAGS.save_dir}/videos"
-        os.makedirs(video_dir, exist_ok=True)
-        env = RecordVideo(
-            env,
-            video_folder=video_dir,
-            episode_trigger=lambda x: x % 10 == 0,  # Record every 10th episode
-            name_prefix="highway_training",
-        )
-
     env = FlattenObservation(env)  # Flatten (15, 6) -> (90,)
-    # env = BoundObservationWrapper(env)  # Bound infinite obs space
     env = TimeLimit(env, max_episode_steps=1000)
 
     eval_env = gym.make(FLAGS.env_name, config=highway_config, render_mode="rgb_array")
-
-    # Add video recording wrapper for evaluation if requested
-    # if FLAGS.record_video:
-    #     eval_env = RecordVideo(
-    #         eval_env,
-    #         video_folder=video_dir,
-    #         episode_trigger=lambda x: True,  # Record all evaluation episodes
-    #         name_prefix="highway_evaluation",
-    #     )
-
     eval_env = FlattenObservation(eval_env)  # Flatten (15, 6) -> (90,)
-    # eval_env = BoundObservationWrapper(eval_env)  # Bound infinite obs space
     eval_env = TimeLimit(eval_env, max_episode_steps=1000)
 
     kwargs = dict(FLAGS.config)
@@ -323,13 +299,19 @@ def main(_):
 
         # Fix highway-env's backward driving reward bug
         # Replace highway-env's speed reward with forward-only speed reward
-        original_speed_reward = info.get('speed_reward', 0.0) if 'speed_reward' in info else 0.0
-        forward_speed_reward = calculate_forward_speed_reward(env, reward_speed_range=[30, 45])
-        
+        original_speed_reward = info["rewards"]["high_speed_reward"]
+        forward_speed_reward = calculate_forward_speed_reward(
+            env, reward_speed_range=[30, 45]
+        )
+
         # Adjust reward: remove original speed component and add forward-only version
         # Highway-env uses 0.4 weight for speed reward in default config
         speed_weight = 0.4
-        reward = reward - original_speed_reward * speed_weight + forward_speed_reward * speed_weight
+        reward = (
+            reward
+            - original_speed_reward * speed_weight
+            + forward_speed_reward * speed_weight
+        )
 
         # Compute safety reward
         safety_bonus = safety_reward_fn(next_observation, env, info)
@@ -440,21 +422,61 @@ def main(_):
                 )
                 os.makedirs(policy_folder, exist_ok=True)
 
+                # Convert config to regular dict to avoid serialization issues
+                config_dict = dict(
+                    FLAGS.config
+                )  # Use dict() constructor for ConfigDict
+
+                # Convert flags to regular dict
+                flags_dict = {}
+                for key, value in FLAGS.flag_values_dict().items():
+                    if key != "config":  # Skip config to avoid circular reference
+                        try:
+                            # Handle different types properly
+                            if hasattr(value, "to_dict"):
+                                flags_dict[key] = value.to_dict()
+                            elif (
+                                isinstance(value, (str, int, float, bool))
+                                or value is None
+                            ):
+                                flags_dict[key] = value
+                            else:
+                                flags_dict[key] = str(
+                                    value
+                                )  # Convert complex types to string
+                        except Exception as e:
+                            print(f"Warning: Could not serialize flag {key}: {e}")
+                            flags_dict[key] = str(value)
+
                 param_dict = {
                     "actor": agent.actor,
                     "critic": agent.critic,
                     "target_critic_params": agent.target_critic,
                     "temp": agent.temp,
                     "rng": agent.rng,
+                    "config": config_dict,  # Save training configuration as regular dict
+                    "training_flags": flags_dict,  # Save all training flags as regular dict
                 }
+
+                # Config and flags prepared for saving
                 if hasattr(agent, "limits"):
                     param_dict["limits"] = agent.limits
                 if hasattr(agent, "q_entropy_lagrange"):
                     param_dict["q_entropy_lagrange"] = agent.q_entropy_lagrange
 
+                # Save main model checkpoint using Orbax
                 checkpoints.save_checkpoint(
                     policy_folder, param_dict, step=i, keep=FLAGS.keep_checkpoints
                 )
+
+                # Save config separately using pickle (more reliable for non-JAX data)
+                import pickle
+
+                config_file = os.path.join(policy_folder, f"config_{i}.pkl")
+                with open(config_file, "wb") as f:
+                    pickle.dump(
+                        {"config": config_dict, "training_flags": flags_dict}, f
+                    )
                 print(f"Saved checkpoint at step {i} to {policy_folder}")
             except Exception as e:
                 print(f"Cannot save checkpoints: {e}")
