@@ -306,6 +306,7 @@ def main(_):
 
         # Adjust reward: remove original speed component and add forward-only version
         # Highway-env uses 0.4 weight for speed reward in default config
+        # TODO(risteon) fixable?
         speed_weight = 0.4
         reward = (
             reward
@@ -322,7 +323,8 @@ def main(_):
         present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
         if len(present_vehicles) > 0:
             ego_vehicle = present_vehicles[0]  # First present vehicle is ego
-            ego_speed = np.linalg.norm(ego_vehicle[3:5])  # vx, vy of ego vehicle
+            # ego_speed = np.linalg.norm(ego_vehicle[3:5])  # vx, vy of ego vehicle
+            ego_speed = ego_vehicle[3]  # vx of ego vehicle
         else:
             ego_speed = 0.0
         speed_ema = (1 - ema_beta) * speed_ema + ema_beta * ego_speed
