@@ -144,7 +144,12 @@ def load_highway_agent(
 
 
 def run_highway_trajectory(
-    agent, env: gym.Env, max_steps=1000, render_video=False, safety_bonus_coeff=0.01, max_offroad_steps=20
+    agent,
+    env: gym.Env,
+    max_steps=1000,
+    render_video=False,
+    safety_bonus_coeff=0.01,
+    max_offroad_steps=20,
 ):
     """
     Run a single highway trajectory with the agent and collect metrics.
@@ -164,9 +169,9 @@ def run_highway_trajectory(
     offroad_violations = 0
     offroad_durations = []
     current_offroad_duration = 0
-    
+
     # Offroad termination tracking
-    offroad_step_counter = 0
+    # offroad_step_counter = 0
     offroad_terminated = False
 
     # safety_bonus_coeff passed as parameter from checkpoint config or FLAGS
@@ -263,21 +268,21 @@ def run_highway_trajectory(
         training_reward = reward + safety_reward * safety_bonus_coeff
 
         # Track offroad status
-        is_offroad = is_vehicle_offroad(env)
-        if is_offroad:
-            offroad_violations += 1
-            current_offroad_duration += 1
-            # Check for offroad termination
-            offroad_step_counter += 1
-            if offroad_step_counter >= max_offroad_steps:
-                done = True
-                offroad_terminated = True
-        else:
-            if current_offroad_duration > 0:
-                offroad_durations.append(current_offroad_duration)
-                current_offroad_duration = 0
-            # Reset offroad step counter when back on road
-            offroad_step_counter = 0
+        # is_offroad = is_vehicle_offroad(env)
+        # if is_offroad:
+        #     offroad_violations += 1
+        #     current_offroad_duration += 1
+        #     # Check for offroad termination
+        #     offroad_step_counter += 1
+        #     if offroad_step_counter >= max_offroad_steps:
+        #         done = True
+        #         offroad_terminated = True
+        # else:
+        #     if current_offroad_duration > 0:
+        #         offroad_durations.append(current_offroad_duration)
+        #         current_offroad_duration = 0
+        #     # Reset offroad step counter when back on road
+        #     offroad_step_counter = 0
 
         # Track minimum distance to other vehicles
         obs_reshaped = obs.reshape(15, 6)
@@ -300,6 +305,9 @@ def run_highway_trajectory(
         obs = next_obs
 
         if done or truncated:
+            is_offroad = is_vehicle_offroad(env)
+            if is_offroad:
+                offroad_terminated = True
             break
 
     # Handle final offroad duration if episode ended while offroad
@@ -440,7 +448,9 @@ def main(_):
     model_cls = kwargs.pop("model_cls")
     kwargs.pop("group_name", None)  # Remove group_name before passing to agent
     kwargs.pop("safety_penalty", None)  # Remove safety_penalty if present
-    kwargs.pop("max_offroad_steps", None)  # Remove max_offroad_steps before passing to agent
+    kwargs.pop(
+        "max_offroad_steps", None
+    )  # Remove max_offroad_steps before passing to agent
 
     agent = globals()[model_cls].create(
         FLAGS.seed, env.observation_space, env.action_space, **kwargs
