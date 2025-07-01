@@ -267,6 +267,7 @@ def main(_):
 
     speed_ema = 0.0
     safety_ema = 0.0
+    collision_ema = 0.0
 
     ema_beta = 3e-4
 
@@ -318,6 +319,10 @@ def main(_):
         safety_bonus = safety_reward_fn(next_observation, env, info)
         reward += safety_bonus * safety_bonus_coeff
 
+        # Check for collision from highway-env reward components
+        collision_occurred = info["rewards"]["collision_reward"] < 0.0
+        collision_indicator = 1.0 if collision_occurred else 0.0
+
         # Update EMAs for logging
         obs_reshaped = next_observation.reshape(15, 6)  # Reshape flattened obs
         present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
@@ -329,6 +334,7 @@ def main(_):
             ego_speed = 0.0
         speed_ema = (1 - ema_beta) * speed_ema + ema_beta * ego_speed
         safety_ema = (1 - ema_beta) * safety_ema + ema_beta * safety_bonus
+        collision_ema = (1 - ema_beta) * collision_ema + ema_beta * collision_indicator
 
         if not done or truncated:
             mask = 1.0
@@ -484,7 +490,7 @@ def main(_):
                 print(f"Cannot save checkpoints: {e}")
 
         pbar.set_description(
-            f"Step {i}, Return: {reward:.2f}, Speed EMA: {speed_ema:.2f}, Safety EMA: {safety_ema:.2f}"
+            f"Step {i}, Return: {reward:.2f}, Speed EMA: {speed_ema:.2f}, Safety EMA: {safety_ema:.2f}, Collision EMA: {collision_ema:.3f}"
         )
 
         if FLAGS.save_buffer and i % FLAGS.save_buffer_interval == 0:
@@ -495,6 +501,7 @@ def main(_):
         if i % FLAGS.log_interval == 0:
             wandb_log["speed_ema"] = speed_ema
             wandb_log["safety_ema"] = safety_ema
+            wandb_log["collision_ema"] = collision_ema
             if wandb_log:
                 wandb.log(wandb_log, step=i)
 
