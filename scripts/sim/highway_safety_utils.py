@@ -330,22 +330,7 @@ def calculate_forward_speed_reward(env, reward_speed_range=[30, 45]):
 
     # Calculate forward speed (speed in heading direction)
     forward_speed = vehicle.velocity[0]
-
-    # Only reward forward motion (forward_speed > 0)
-    if forward_speed <= 0:
-        return 0.0  # No reward for backward/sideways driving
-
-    # Linear mapping of forward speed to reward range [0, 1]
     min_speed, max_speed = reward_speed_range
-    if forward_speed < min_speed:
-        # Below optimal range: linear scaling from 0
-        speed_reward = forward_speed / min_speed * 0.5  # Half reward below range
-    elif forward_speed <= max_speed:
-        # In optimal range: linear scaling from 0.5 to 1.0
-        progress = (forward_speed - min_speed) / (max_speed - min_speed)
-        speed_reward = 0.5 + progress * 0.5
-    else:
-        # Above optimal range: maximum reward but don't encourage excessive speed
-        speed_reward = 1.0
+    speed_reward = (forward_speed - min_speed) / (max_speed - min_speed)
 
     return float(np.clip(speed_reward, 0.0, 1.0))
