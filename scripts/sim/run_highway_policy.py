@@ -86,31 +86,42 @@ def load_highway_agent(
 
     # Try to load config from separate pickle file (more reliable)
     checkpoint_config = None
-    checkpoint_step = os.path.basename(policy_file).replace('checkpoint_', '')
-    config_file = os.path.join(os.path.dirname(policy_file), f"config_{checkpoint_step}.pkl")
-    
+    checkpoint_step = os.path.basename(policy_file).replace("checkpoint_", "")
+    config_file = os.path.join(
+        os.path.dirname(policy_file), f"config_{checkpoint_step}.pkl"
+    )
+
     if os.path.exists(config_file):
         try:
             import pickle
-            with open(config_file, 'rb') as f:
+
+            with open(config_file, "rb") as f:
                 config_data = pickle.load(f)
-            checkpoint_config = config_data.get('config', None)
+            checkpoint_config = config_data.get("config", None)
             print("Found config in pickle file")
             print(f"Config keys: {list(checkpoint_config.keys())}")
             if "safety_penalty" in checkpoint_config:
-                print(f"safety_penalty from checkpoint: {checkpoint_config['safety_penalty']}")
+                print(
+                    f"safety_penalty from checkpoint: {checkpoint_config['safety_penalty']}"
+                )
         except Exception as e:
             print(f"Error loading config pickle: {e}")
             checkpoint_config = None
-    
-    # Fallback: check if config is saved in main checkpoint 
+
+    # Fallback: check if config is saved in main checkpoint
     if checkpoint_config is None:
-        if "config" in param_dict and param_dict["config"] is not None and len(param_dict["config"]) > 0:
+        if (
+            "config" in param_dict
+            and param_dict["config"] is not None
+            and len(param_dict["config"]) > 0
+        ):
             checkpoint_config = param_dict["config"]
             print("Found config in main checkpoint")
             print(f"Config keys: {list(checkpoint_config.keys())}")
             if "safety_penalty" in checkpoint_config:
-                print(f"safety_penalty from checkpoint: {checkpoint_config['safety_penalty']}")
+                print(
+                    f"safety_penalty from checkpoint: {checkpoint_config['safety_penalty']}"
+                )
         else:
             print("No config found in checkpoint - using command line flags")
 
@@ -132,7 +143,9 @@ def load_highway_agent(
     return agent.replace(**replace_dict), checkpoint_config
 
 
-def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=False, safety_bonus_coeff=0.01):
+def run_highway_trajectory(
+    agent, env: gym.Env, max_steps=1000, render_video=False, safety_bonus_coeff=0.01
+):
     """
     Run a single highway trajectory with the agent and collect metrics.
     """
@@ -151,7 +164,7 @@ def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=Fal
     offroad_violations = 0
     offroad_durations = []
     current_offroad_duration = 0
-    
+
     # safety_bonus_coeff passed as parameter from checkpoint config or FLAGS
 
     for step in range(max_steps):
@@ -184,10 +197,14 @@ def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=Fal
                         (10, 50), f"Safety: {safety_reward:.3f}", fill=(255, 255, 255)
                     )
                     draw.text(
-                        (10, 70), f"Env Return: {episode_return:.2f}", fill=(255, 255, 255)
+                        (10, 70),
+                        f"Env Return: {episode_return:.2f}",
+                        fill=(255, 255, 255),
                     )
                     draw.text(
-                        (10, 90), f"Training Return: {training_return:.2f}", fill=(255, 255, 255)
+                        (10, 90),
+                        f"Training Return: {training_return:.2f}",
+                        fill=(255, 255, 255),
                     )
                     draw.text(
                         (10, 110),
@@ -237,7 +254,7 @@ def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=Fal
         safety_reward = safety_reward_fn(obs, env)
         if safety_reward < -0.5:  # Threshold for safety violation
             safety_violations += 1
-        
+
         # Calculate training reward (env + safety, as used in training)
         training_reward = reward + safety_reward * safety_bonus_coeff
 
@@ -263,7 +280,7 @@ def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=Fal
             min_distances.append(np.min(distances))
 
         # Check for collision
-        if reward < -0.9:  # Assuming large negative reward indicates collision
+        if info["rewards"]["collision"] < 0.0:
             collision_occurred = True
 
         episode_return += reward
@@ -312,7 +329,12 @@ def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=Fal
 
 
 def evaluate_highway_policy(
-    agent, env, num_episodes=10, render_video=False, max_steps=1000, safety_bonus_coeff=0.01
+    agent,
+    env,
+    num_episodes=10,
+    render_video=False,
+    max_steps=1000,
+    safety_bonus_coeff=0.01,
 ):
     """
     Evaluate highway policy over multiple episodes and aggregate results.
@@ -324,7 +346,11 @@ def evaluate_highway_policy(
 
     for episode in trange(num_episodes, desc="Evaluation"):
         images, metrics = run_highway_trajectory(
-            agent, env, max_steps=max_steps, render_video=render_video, safety_bonus_coeff=safety_bonus_coeff
+            agent,
+            env,
+            max_steps=max_steps,
+            render_video=render_video,
+            safety_bonus_coeff=safety_bonus_coeff,
         )
 
         metrics["episode_id"] = episode
@@ -407,7 +433,7 @@ def main(_):
     policy_path = os.path.abspath(FLAGS.policy_file)
     print(f"Loading policy from: {policy_path}")
     agent, checkpoint_config = load_highway_agent(agent, policy_path)
-    
+
     # Use checkpoint config if available, otherwise fall back to FLAGS.config
     if checkpoint_config is not None:
         print("Using config from checkpoint")
