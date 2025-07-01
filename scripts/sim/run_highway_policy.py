@@ -280,7 +280,7 @@ def run_highway_trajectory(
             min_distances.append(np.min(distances))
 
         # Check for collision
-        if info["rewards"]["collision"] < 0.0:
+        if info["rewards"]["collision_reward"] < 0.0:
             collision_occurred = True
 
         episode_return += reward
