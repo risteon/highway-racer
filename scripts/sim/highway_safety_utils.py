@@ -32,7 +32,24 @@ def safety_reward_fn(obs, env=None, info=None):
 
 
 def _calculate_collision_risk(obs):
-    """Calculate collision risk based on proximity to other vehicles."""
+    """
+    Calculate collision risk based on Time-to-Collision (TTC) in forward direction.
+    
+    Enhanced safety function that:
+    - Uses TTC for predictive collision assessment
+    - Focuses on vehicles in forward driving direction
+    - Applies dual constraints: TTC threshold AND distance < 1m
+    - Provides progressive penalties based on collision urgency
+    
+    Args:
+        obs: Flattened observation (90,) = 15 vehicles × 6 features
+             Features: [presence, x, y, vx, vy, heading]
+    
+    Returns:
+        collision_risk: Negative penalty for collision risk (0.0 to -1.0)
+    """
+    import numpy as np
+    
     # Reshape flattened observation back to (15, 6)
     obs = obs.reshape(15, 6)  # [presence, x, y, vx, vy, heading]
 
@@ -45,29 +62,61 @@ def _calculate_collision_risk(obs):
     ego_vehicle = present_vehicles[0]  # First present vehicle is ego
     other_vehicles = present_vehicles[1:]  # Rest are other vehicles
 
-    # Compute distances to all other vehicles
-    ego_pos = ego_vehicle[1:3]  # [x, y] (skip presence feature)
-    other_pos = other_vehicles[:, 1:3]  # [n_vehicles, 2]
-
-    distances = np.linalg.norm(other_pos - ego_pos, axis=1)
-    min_distance = np.min(distances)
-
+    # Extract ego vehicle state
+    ego_pos = ego_vehicle[1:3]        # [x, y]
+    ego_vel = ego_vehicle[3:5]        # [vx, vy]
+    ego_heading = ego_vehicle[5]      # heading angle
+    
+    # Calculate ego forward direction vector
+    ego_forward = np.array([np.cos(ego_heading), np.sin(ego_heading)])
+    
     # Safety parameters
-    safety_threshold = 10.0  # meters - safe following distance
-    collision_threshold = 2.0  # meters - collision imminent
-
-    if min_distance < collision_threshold:
-        collision_risk = -1.0  # High penalty for imminent collision
-    elif min_distance < safety_threshold:
-        # Exponential penalty for unsafe proximity
-        collision_risk = -np.exp(
-            -(min_distance - collision_threshold)
-            / (safety_threshold - collision_threshold)
-        )
-    else:
-        collision_risk = 0.0  # Safe distance
-
-    return collision_risk
+    critical_ttc = 1.0      # seconds - immediate danger
+    warning_ttc = 3.0       # seconds - early warning
+    proximity_threshold = 1.0  # meters - Euclidean distance limit
+    forward_cone_angle = np.pi / 4  # 45 degrees (±22.5° from heading)
+    
+    max_collision_risk = 0.0  # Track the maximum risk from all vehicles
+    
+    for other_vehicle in other_vehicles:
+        other_pos = other_vehicle[1:3]  # [x, y]
+        other_vel = other_vehicle[3:5]  # [vx, vy]
+        
+        # Calculate relative vectors
+        relative_pos = other_pos - ego_pos
+        relative_vel = other_vel - ego_vel
+        euclidean_distance = np.linalg.norm(relative_pos)
+        
+        # Check if vehicle is in forward cone
+        if euclidean_distance > 0:  # Avoid division by zero
+            to_vehicle_unit = relative_pos / euclidean_distance
+            forward_dot = np.dot(to_vehicle_unit, ego_forward)
+            angle_to_vehicle = np.arccos(np.clip(forward_dot, -1.0, 1.0))
+            
+            # Only consider vehicles in forward cone
+            if angle_to_vehicle <= forward_cone_angle:
+                # Calculate TTC in forward direction
+                forward_distance = np.dot(relative_pos, ego_forward)
+                approach_velocity = np.dot(relative_vel, ego_forward)
+                
+                # Only calculate TTC if vehicles are approaching and in forward direction
+                if approach_velocity > 0 and forward_distance > 0:
+                    ttc = forward_distance / approach_velocity
+                    
+                    # Apply dual safety constraints: TTC AND proximity
+                    if ttc < warning_ttc and euclidean_distance < proximity_threshold:
+                        if ttc < critical_ttc:
+                            # Maximum penalty for imminent collision
+                            collision_risk = -1.0
+                        else:
+                            # Progressive penalty based on TTC urgency
+                            urgency_factor = (warning_ttc - ttc) / (warning_ttc - critical_ttc)
+                            collision_risk = -np.exp(-3.0 * (1.0 - urgency_factor))
+                        
+                        # Track maximum risk across all vehicles
+                        max_collision_risk = min(max_collision_risk, collision_risk)
+    
+    return max_collision_risk
 
 
 def _calculate_offroad_penalty(env):
