@@ -46,51 +46,8 @@ config_flags.DEFINE_config_file(
 )
 
 
-def safety_reward_fn(obs, info=None):
-    """
-    Collision risk-based safety reward for highway driving.
-    Penalizes close proximity to other vehicles.
-    
-    Args:
-        obs: Flattened highway environment observation (90,) = 15 vehicles × 6 features
-        info: Additional environment info (optional)
-    
-    Returns:
-        safety_reward: Negative reward for collision risk
-    """
-    # Reshape flattened observation back to (15, 6)
-    obs = obs.reshape(15, 6)  # [presence, x, y, vx, vy, heading]
-    
-    # Filter for present vehicles (presence > 0.5)
-    present_vehicles = obs[obs[:, 0] > 0.5]
-    
-    if len(present_vehicles) <= 1:
-        return 0.0  # Only ego vehicle or no vehicles, no collision risk
-    
-    ego_vehicle = present_vehicles[0]  # First present vehicle is ego
-    other_vehicles = present_vehicles[1:]  # Rest are other vehicles
-    
-    # Compute distances to all other vehicles
-    ego_pos = ego_vehicle[1:3]  # [x, y] (skip presence feature)
-    other_pos = other_vehicles[:, 1:3]  # [n_vehicles, 2]
-    
-    distances = np.linalg.norm(other_pos - ego_pos, axis=1)
-    min_distance = np.min(distances)
-    
-    # Safety parameters
-    safety_threshold = 10.0  # meters - safe following distance
-    collision_threshold = 2.0  # meters - collision imminent
-    
-    if min_distance < collision_threshold:
-        collision_risk = -1.0  # High penalty for imminent collision
-    elif min_distance < safety_threshold:
-        # Exponential penalty for unsafe proximity
-        collision_risk = -np.exp(-(min_distance - collision_threshold) / 
-                                (safety_threshold - collision_threshold))
-    else:
-        collision_risk = 0.0  # Safe distance
-    
-    return collision_risk
+# Import shared safety functions
+from highway_safety_utils import safety_reward_fn, is_vehicle_offroad, debug_vehicle_position
 
 
 def load_highway_agent(agent: Union[SACLearner, DistributionalSACLearner], policy_file: str):
@@ -146,6 +103,9 @@ def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=Fal
     min_distances = []
     ego_speeds = []
     collision_occurred = False
+    offroad_violations = 0
+    offroad_durations = []
+    current_offroad_duration = 0
     
     for step in range(max_steps):
         if render_video:
@@ -164,13 +124,29 @@ def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=Fal
                     ego_speeds.append(ego_speed)
                     
                     # Calculate safety metrics for overlay
-                    safety_reward = safety_reward_fn(obs)
+                    safety_reward = safety_reward_fn(obs, env)
+                    is_offroad = is_vehicle_offroad(env)
+                    debug_info = debug_vehicle_position(env)
                     
-                    # Add text overlay
+                    # Add text overlay with debug info
                     draw.text((10, 10), f"Step: {step}", fill=(255, 255, 255))
                     draw.text((10, 30), f"Speed: {ego_speed:.2f} m/s", fill=(255, 255, 255))
                     draw.text((10, 50), f"Safety: {safety_reward:.3f}", fill=(255, 255, 255))
                     draw.text((10, 70), f"Return: {episode_return:.2f}", fill=(255, 255, 255))
+                    draw.text((10, 90), f"Offroad: {'YES' if is_offroad else 'NO'}", 
+                             fill=(255, 0, 0) if is_offroad else (0, 255, 0))
+                    
+                    # Add debug information
+                    if 'lateral' in debug_info and 'lane_width' in debug_info:
+                        lateral = debug_info['lateral']
+                        lane_width = debug_info['lane_width']
+                        draw.text((10, 110), f"Lateral: {lateral:.2f}m", fill=(255, 255, 255))
+                        draw.text((10, 130), f"Lane Width: {lane_width:.2f}m", fill=(255, 255, 255))
+                        draw.text((10, 150), f"Margin: {lateral - lane_width/2:.2f}m", 
+                                 fill=(255, 0, 0) if abs(lateral) > lane_width/2 else (0, 255, 0))
+                    
+                    if 'on_road_property' in debug_info:
+                        draw.text((10, 170), f"OnRoad Prop: {debug_info['on_road_property']}", fill=(255, 255, 255))
                 
                 images.append(np.asarray(img_pil))
         
@@ -182,9 +158,19 @@ def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=Fal
         next_obs, reward, done, truncated, info = env.step(action)
         
         # Calculate safety metrics
-        safety_reward = safety_reward_fn(obs)
+        safety_reward = safety_reward_fn(obs, env)
         if safety_reward < -0.5:  # Threshold for safety violation
             safety_violations += 1
+        
+        # Track offroad status
+        is_offroad = is_vehicle_offroad(env)
+        if is_offroad:
+            offroad_violations += 1
+            current_offroad_duration += 1
+        else:
+            if current_offroad_duration > 0:
+                offroad_durations.append(current_offroad_duration)
+                current_offroad_duration = 0
         
         # Track minimum distance to other vehicles
         obs_reshaped = obs.reshape(15, 6)
@@ -208,21 +194,31 @@ def run_highway_trajectory(agent, env: gym.Env, max_steps=1000, render_video=Fal
         if done or truncated:
             break
     
+    # Handle final offroad duration if episode ended while offroad
+    if current_offroad_duration > 0:
+        offroad_durations.append(current_offroad_duration)
+    
     # Calculate summary metrics
-    avg_min_distance = np.mean(min_distances) if min_distances else 0.0
-    avg_ego_speed = np.mean(ego_speeds) if ego_speeds else 0.0
-    safety_violation_rate = safety_violations / episode_length if episode_length > 0 else 0.0
+    avg_min_distance = float(np.mean(min_distances)) if min_distances else 0.0
+    avg_ego_speed = float(np.mean(ego_speeds)) if ego_speeds else 0.0
+    safety_violation_rate = float(safety_violations / episode_length) if episode_length > 0 else 0.0
+    offroad_violation_rate = float(offroad_violations / episode_length) if episode_length > 0 else 0.0
+    avg_offroad_duration = float(np.mean(offroad_durations)) if offroad_durations else 0.0
     
     trajectory_metrics = {
-        "episode_return": episode_return,
-        "episode_length": episode_length,
-        "collision_occurred": collision_occurred,
-        "safety_violations": safety_violations,
+        "episode_return": float(episode_return),
+        "episode_length": int(episode_length),
+        "collision_occurred": bool(collision_occurred),
+        "safety_violations": int(safety_violations),
         "safety_violation_rate": safety_violation_rate,
         "avg_min_distance": avg_min_distance,
         "avg_ego_speed": avg_ego_speed,
-        "min_distance_ever": np.min(min_distances) if min_distances else 0.0,
-        "max_ego_speed": np.max(ego_speeds) if ego_speeds else 0.0,
+        "min_distance_ever": float(np.min(min_distances)) if min_distances else 0.0,
+        "max_ego_speed": float(np.max(ego_speeds)) if ego_speeds else 0.0,
+        "offroad_violations": int(offroad_violations),
+        "offroad_violation_rate": offroad_violation_rate,
+        "avg_offroad_duration": avg_offroad_duration,
+        "total_offroad_steps": int(offroad_violations),
     }
     
     return images, trajectory_metrics
@@ -255,18 +251,25 @@ def evaluate_highway_policy(agent, env, num_episodes=10, render_video=False, max
     safety_rates = [m["safety_violation_rate"] for m in all_metrics]
     min_distances = [m["avg_min_distance"] for m in all_metrics]
     speeds = [m["avg_ego_speed"] for m in all_metrics]
+    offroad_rates = [m["offroad_violation_rate"] for m in all_metrics]
+    offroad_durations = [m["avg_offroad_duration"] for m in all_metrics]
+    total_offroad_steps = [m["total_offroad_steps"] for m in all_metrics]
     
     summary_stats = {
-        "num_episodes": num_episodes,
-        "mean_return": np.mean(returns),
-        "std_return": np.std(returns),
-        "mean_length": np.mean(lengths),
-        "std_length": np.std(lengths),
-        "collision_rate": np.mean(collisions),
-        "mean_safety_violation_rate": np.mean(safety_rates),
-        "mean_min_distance": np.mean(min_distances),
-        "mean_ego_speed": np.mean(speeds),
-        "success_rate": 1.0 - np.mean(collisions),  # Episodes without collision
+        "num_episodes": int(num_episodes),
+        "mean_return": float(np.mean(returns)),
+        "std_return": float(np.std(returns)),
+        "mean_length": float(np.mean(lengths)),
+        "std_length": float(np.std(lengths)),
+        "collision_rate": float(np.mean(collisions)),
+        "mean_safety_violation_rate": float(np.mean(safety_rates)),
+        "mean_min_distance": float(np.mean(min_distances)),
+        "mean_ego_speed": float(np.mean(speeds)),
+        "success_rate": float(1.0 - np.mean(collisions)),  # Episodes without collision
+        "mean_offroad_violation_rate": float(np.mean(offroad_rates)),
+        "mean_offroad_duration": float(np.mean(offroad_durations)),
+        "total_offroad_steps_all_episodes": int(np.sum(total_offroad_steps)),
+        "offroad_episode_rate": float(np.mean([1.0 if rate > 0 else 0.0 for rate in offroad_rates])),
     }
     
     return all_metrics, summary_stats, all_videos
@@ -291,7 +294,8 @@ def main(_):
         "collision_reward": -1,
         "reward_speed_range": [20, 30],
         "simulation_frequency": 15,
-        "policy_frequency": 5
+        "policy_frequency": 5,
+        "offroad_terminal": False,  # Keep False to avoid early termination, use our enhanced detection
     }
     
     # Create environment
@@ -313,9 +317,10 @@ def main(_):
         **kwargs
     )
     
-    # Load trained policy
-    print(f"Loading policy from: {FLAGS.policy_file}")
-    agent = load_highway_agent(agent, FLAGS.policy_file)
+    # Load trained policy  
+    policy_path = os.path.abspath(FLAGS.policy_file)
+    print(f"Loading policy from: {policy_path}")
+    agent = load_highway_agent(agent, policy_path)
     
     # Create output directory
     Path(FLAGS.video_output_dir).mkdir(parents=True, exist_ok=True)
@@ -340,6 +345,13 @@ def main(_):
     print(f"Mean Safety Violation Rate: {summary_stats['mean_safety_violation_rate']:.1%}")
     print(f"Mean Min Distance: {summary_stats['mean_min_distance']:.2f}m")
     print(f"Mean Ego Speed: {summary_stats['mean_ego_speed']:.2f} m/s")
+    print("="*50)
+    print("OFFROAD SAFETY METRICS")
+    print("="*50)
+    print(f"Mean Offroad Violation Rate: {summary_stats['mean_offroad_violation_rate']:.1%}")
+    print(f"Offroad Episode Rate: {summary_stats['offroad_episode_rate']:.1%}")
+    print(f"Mean Offroad Duration: {summary_stats['mean_offroad_duration']:.1f} steps")
+    print(f"Total Offroad Steps: {summary_stats['total_offroad_steps_all_episodes']}")
     
     # Save metrics to JSON
     if FLAGS.save_metrics:

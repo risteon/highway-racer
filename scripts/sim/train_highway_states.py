@@ -105,53 +105,8 @@ config_flags.DEFINE_config_file(
 )
 
 
-def safety_reward_fn(obs, info=None):
-    """
-    Collision risk-based safety reward for highway driving.
-    Penalizes close proximity to other vehicles.
-
-    Args:
-        obs: Flattened highway environment observation (90,) = 15 vehicles × 6 features
-        info: Additional environment info (optional)
-
-    Returns:
-        safety_reward: Negative reward for collision risk
-    """
-    # Reshape flattened observation back to (15, 6)
-    obs = obs.reshape(15, 6)  # [presence, x, y, vx, vy, heading]
-
-    # Filter for present vehicles (presence > 0.5)
-    present_vehicles = obs[obs[:, 0] > 0.5]
-
-    if len(present_vehicles) <= 1:
-        return 0.0  # Only ego vehicle or no vehicles, no collision risk
-
-    ego_vehicle = present_vehicles[0]  # First present vehicle is ego
-    other_vehicles = present_vehicles[1:]  # Rest are other vehicles
-
-    # Compute distances to all other vehicles
-    ego_pos = ego_vehicle[1:3]  # [x, y] (skip presence feature)
-    other_pos = other_vehicles[:, 1:3]  # [n_vehicles, 2]
-
-    distances = np.linalg.norm(other_pos - ego_pos, axis=1)
-    min_distance = np.min(distances)
-
-    # Safety parameters
-    safety_threshold = 10.0  # meters - safe following distance
-    collision_threshold = 2.0  # meters - collision imminent
-
-    if min_distance < collision_threshold:
-        collision_risk = -1.0  # High penalty for imminent collision
-    elif min_distance < safety_threshold:
-        # Exponential penalty for unsafe proximity
-        collision_risk = -np.exp(
-            -(min_distance - collision_threshold)
-            / (safety_threshold - collision_threshold)
-        )
-    else:
-        collision_risk = 0.0  # Safe distance
-
-    return collision_risk
+# Import shared safety functions
+from highway_safety_utils import safety_reward_fn
 
 
 def run_trajectory(
@@ -232,11 +187,15 @@ def main(_):
         "reward_speed_range": [20, 30],
         "simulation_frequency": 15,
         "policy_frequency": 5,
+        "offroad_terminal": True,  # Enable proper offroad detection
     }
 
     # Set render mode if video recording is enabled
     # render_mode = "rgb_array" if FLAGS.record_video else None
     env = gym.make(FLAGS.env_name, config=highway_config, render_mode=None)
+
+    # Apply RecordEpisodeStatistics FIRST to ensure episode info propagation
+    env = RecordEpisodeStatistics(env)
 
     # Add video recording wrapper if requested
     if FLAGS.record_video:
@@ -252,7 +211,6 @@ def main(_):
     env = FlattenObservation(env)  # Flatten (15, 6) -> (90,)
     # env = BoundObservationWrapper(env)  # Bound infinite obs space
     env = TimeLimit(env, max_episode_steps=1000)
-    env = RecordEpisodeStatistics(env)
 
     eval_env = gym.make(FLAGS.env_name, config=highway_config, render_mode="rgb_array")
 
@@ -364,7 +322,7 @@ def main(_):
         next_observation, reward, done, truncated, info = env.step(action)
 
         # Compute safety reward
-        safety_bonus = safety_reward_fn(next_observation, info)
+        safety_bonus = safety_reward_fn(next_observation, env, info)
         reward += safety_bonus * safety_bonus_coeff
 
         # Update EMAs for logging
@@ -398,12 +356,13 @@ def main(_):
         observation = next_observation
 
         if done or truncated:
-            observation, info = env.reset()
             if "episode" in info:
                 for k, v in info["episode"].items():
                     decode = {"r": "return", "l": "length", "t": "time"}
                     wandb_log = {f"training/{decode[k]}": v}
                     wandb.log(wandb_log, step=i)
+
+            observation, info = env.reset()
 
         if i >= FLAGS.start_training:
             batch = next(replay_buffer_iterator)
@@ -461,8 +420,14 @@ def main(_):
         if i % FLAGS.save_checkpoint_interval == 0 or i == 100:
             try:
                 # Handle case where wandb.run.name might be None (offline mode)
-                run_name = wandb.run.name if wandb.run.name is not None else f"highway_run_{FLAGS.seed}"
-                policy_folder = os.path.abspath(os.path.join(FLAGS.checkpoint_dir, run_name))
+                run_name = (
+                    wandb.run.name
+                    if wandb.run.name is not None
+                    else f"highway_run_{FLAGS.seed}"
+                )
+                policy_folder = os.path.abspath(
+                    os.path.join(FLAGS.checkpoint_dir, run_name)
+                )
                 os.makedirs(policy_folder, exist_ok=True)
 
                 param_dict = {
