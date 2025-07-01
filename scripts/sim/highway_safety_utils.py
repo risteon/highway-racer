@@ -48,13 +48,12 @@ def _calculate_collision_risk(obs):
     Returns:
         collision_risk: Negative penalty for collision risk (0.0 to -1.0)
     """
-    import numpy as np
-
     # Reshape flattened observation back to (15, 6)
     obs = obs.reshape(15, 6)  # [presence, x, y, vx, vy, heading]
 
     # Filter for present vehicles (presence > 0.5)
-    present_vehicles = obs[obs[:, 0] > 0.5]
+    present_mask = obs[:, 0] > 0.5
+    present_vehicles = obs[present_mask]
 
     if len(present_vehicles) <= 1:
         return 0.0  # Only ego vehicle or no vehicles, no collision risk
@@ -72,52 +71,77 @@ def _calculate_collision_risk(obs):
 
     # Safety parameters
     critical_ttc = 1.0  # seconds - immediate danger
-    warning_ttc = 3.0  # seconds - early warning
+    warning_ttc = 2.0  # seconds - early warning
     proximity_threshold = 1.0  # meters - Euclidean distance limit
     forward_cone_angle = np.pi / 8  # 22.5 degrees (±11.25° from heading)
 
-    max_collision_risk = 0.0  # Track the maximum risk from all vehicles
+    # Vectorized extraction for other vehicles
+    other_pos = other_vehicles[:, 1:3]  # shape (N, 2)
+    other_vel = other_vehicles[:, 3:5]  # shape (N, 2)
 
-    for other_vehicle in other_vehicles:
-        other_pos = other_vehicle[1:3]  # [x, y]
-        other_vel = other_vehicle[3:5]  # [vx, vy]
+    # Relative position and velocity
+    relative_pos = other_pos - ego_pos  # (N, 2)
+    relative_vel = other_vel - ego_vel  # (N, 2)
+    euclidean_distance = np.linalg.norm(relative_pos, axis=1)  # (N,)
 
-        # Calculate relative vectors
-        relative_pos = other_pos - ego_pos
-        relative_vel = other_vel - ego_vel
-        euclidean_distance = np.linalg.norm(relative_pos)
+    # # Avoid division by zero for zero distance
+    # nonzero_mask = euclidean_distance > 0
+    # if not np.any(nonzero_mask):
+    #     return 0.0
 
-        # Check if vehicle is in forward cone
-        if euclidean_distance > 0:  # Avoid division by zero
-            to_vehicle_unit = relative_pos / euclidean_distance
-            forward_dot = np.dot(to_vehicle_unit, ego_forward)
-            angle_to_vehicle = np.arccos(np.clip(forward_dot, -1.0, 1.0))
+    # # Only consider vehicles with nonzero distance
+    # rel_pos_nz = relative_pos[nonzero_mask]
+    # rel_vel_nz = relative_vel[nonzero_mask]
+    # dist_nz = euclidean_distance[nonzero_mask]
 
-            # Only consider vehicles in forward cone
-            if angle_to_vehicle <= forward_cone_angle:
-                # Calculate TTC in forward direction
-                forward_distance = np.dot(relative_pos, ego_forward)
-                approach_velocity = np.dot(relative_vel, ego_forward)
+    # Unit vector to each vehicle
+    to_vehicle_unit = relative_pos / euclidean_distance[:, None]  # (M, 2)
+    forward_dot = np.dot(to_vehicle_unit, ego_forward)  # (M,)
+    angle_to_vehicle = np.arccos(np.clip(forward_dot, -1.0, 1.0))  # (M,)
 
-                # Only calculate TTC if vehicles are approaching and in forward direction
-                if approach_velocity > 0 and forward_distance > 0:
-                    ttc = forward_distance / approach_velocity
+    # Vehicles in forward cone
+    in_cone_mask = angle_to_vehicle <= forward_cone_angle
+    if not np.any(in_cone_mask):
+        return 0.0
 
-                    # Apply dual safety constraints: TTC AND proximity
-                    if ttc < warning_ttc and euclidean_distance < proximity_threshold:
-                        if ttc < critical_ttc:
-                            # Maximum penalty for imminent collision
-                            collision_risk = -1.0
-                        else:
-                            # Progressive penalty based on TTC urgency
-                            urgency_factor = (warning_ttc - ttc) / (
-                                warning_ttc - critical_ttc
-                            )
-                            collision_risk = -np.exp(-3.0 * (1.0 - urgency_factor))
+    # Filter for vehicles in cone
+    rel_pos_fc = relative_pos[in_cone_mask]
+    rel_vel_fc = relative_vel[in_cone_mask]
+    dist_fc = euclidean_distance[in_cone_mask]
 
-                        # Track maximum risk across all vehicles
-                        max_collision_risk = min(max_collision_risk, collision_risk)
+    # Forward distance and approach velocity
+    forward_distance = np.dot(rel_pos_fc, ego_forward)  # (K,)
+    approach_velocity = np.dot(rel_vel_fc, ego_forward)  # (K,)
 
+    # Only calculate TTC if vehicles are approaching and in forward direction
+    approaching_mask = (approach_velocity > 0) & (forward_distance > 0)
+    if not np.any(approaching_mask):
+        return 0.0
+
+    fd = forward_distance[approaching_mask]
+    av = approach_velocity[approaching_mask]
+    dist = dist_fc[approaching_mask]
+    ttc = fd / av
+
+    # Apply dual safety constraints: TTC AND proximity
+    danger_mask = (ttc < warning_ttc) & (dist < proximity_threshold)
+    if not np.any(danger_mask):
+        return 0.0
+
+    ttc_danger = ttc[danger_mask]
+
+    # Compute collision risk for each dangerous vehicle
+    collision_risk = np.zeros_like(ttc_danger)  # (L,)
+    critical_mask = ttc_danger < critical_ttc
+    collision_risk[critical_mask] = -1.0
+    if np.any(~critical_mask):
+        urgency_factor = (warning_ttc - ttc_danger[~critical_mask]) / (
+            warning_ttc - critical_ttc
+        )
+        collision_risk[~critical_mask] = -np.exp(-3.0 * (1.0 - urgency_factor))
+
+    # Track maximum risk across all vehicles (most negative value)
+    max_collision_risk = np.min(collision_risk)
     return max_collision_risk
 
 
