@@ -318,9 +318,6 @@ def calculate_forward_speed_reward(env, reward_speed_range=[30, 45]):
     Returns:
         speed_reward: Reward for forward driving speed (0.0 if backward)
     """
-    if env is None:
-        return 0.0
-
     # Access vehicle through unwrapped environment if needed
     vehicle = None
     if hasattr(env, "vehicle") and env.vehicle is not None:
@@ -332,9 +329,7 @@ def calculate_forward_speed_reward(env, reward_speed_range=[30, 45]):
         return 0.0
 
     # Calculate forward speed (speed in heading direction)
-    import numpy as np
-
-    forward_speed = vehicle.speed * np.cos(vehicle.heading)
+    forward_speed = vehicle.velocity[0]
 
     # Only reward forward motion (forward_speed > 0)
     if forward_speed <= 0:
