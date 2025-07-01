@@ -47,7 +47,7 @@ config_flags.DEFINE_config_file(
 
 
 # Import shared safety functions
-from highway_safety_utils import safety_reward_fn, is_vehicle_offroad, debug_vehicle_position
+from highway_safety_utils import safety_reward_fn, is_vehicle_offroad, debug_vehicle_position, calculate_forward_speed_reward
 
 
 def load_highway_agent(agent: Union[SACLearner, DistributionalSACLearner], policy_file: str):
@@ -292,7 +292,7 @@ def main(_):
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -1,
-        "reward_speed_range": [20, 30],
+        "reward_speed_range": [30, 45],
         "simulation_frequency": 15,
         "policy_frequency": 5,
         "offroad_terminal": False,  # Keep False to avoid early termination, use our enhanced detection

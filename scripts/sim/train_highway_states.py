@@ -106,7 +106,7 @@ config_flags.DEFINE_config_file(
 
 
 # Import shared safety functions
-from highway_safety_utils import safety_reward_fn
+from highway_safety_utils import safety_reward_fn, calculate_forward_speed_reward
 
 
 def run_trajectory(
@@ -184,7 +184,7 @@ def main(_):
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -1,
-        "reward_speed_range": [20, 30],
+        "reward_speed_range": [30, 45],
         "simulation_frequency": 15,
         "policy_frequency": 5,
         "offroad_terminal": True,  # Enable proper offroad detection
@@ -320,6 +320,16 @@ def main(_):
             action_max[1] = max_action_schedule(i)
 
         next_observation, reward, done, truncated, info = env.step(action)
+
+        # Fix highway-env's backward driving reward bug
+        # Replace highway-env's speed reward with forward-only speed reward
+        original_speed_reward = info.get('speed_reward', 0.0) if 'speed_reward' in info else 0.0
+        forward_speed_reward = calculate_forward_speed_reward(env, reward_speed_range=[30, 45])
+        
+        # Adjust reward: remove original speed component and add forward-only version
+        # Highway-env uses 0.4 weight for speed reward in default config
+        speed_weight = 0.4
+        reward = reward - original_speed_reward * speed_weight + forward_speed_reward * speed_weight
 
         # Compute safety reward
         safety_bonus = safety_reward_fn(next_observation, env, info)

@@ -243,3 +243,54 @@ def debug_vehicle_position(env):
             debug_info['lane_error'] = str(e)
     
     return debug_info
+
+
+def calculate_forward_speed_reward(env, reward_speed_range=[30, 45]):
+    """
+    Calculate speed reward that only rewards forward driving.
+    
+    Fixes highway-env's backward driving reward bug by ensuring only 
+    forward motion in the desired speed range is rewarded.
+    
+    Args:
+        env: Highway environment instance
+        reward_speed_range: [min_speed, max_speed] for optimal reward
+        
+    Returns:
+        speed_reward: Reward for forward driving speed (0.0 if backward)
+    """
+    if env is None:
+        return 0.0
+    
+    # Access vehicle through unwrapped environment if needed
+    vehicle = None
+    if hasattr(env, 'vehicle') and env.vehicle is not None:
+        vehicle = env.vehicle
+    elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'vehicle'):
+        vehicle = env.unwrapped.vehicle
+    
+    if vehicle is None:
+        return 0.0
+    
+    # Calculate forward speed (speed in heading direction)
+    import numpy as np
+    forward_speed = vehicle.speed * np.cos(vehicle.heading)
+    
+    # Only reward forward motion (forward_speed > 0)
+    if forward_speed <= 0:
+        return 0.0  # No reward for backward/sideways driving
+    
+    # Linear mapping of forward speed to reward range [0, 1]
+    min_speed, max_speed = reward_speed_range
+    if forward_speed < min_speed:
+        # Below optimal range: linear scaling from 0
+        speed_reward = forward_speed / min_speed * 0.5  # Half reward below range
+    elif forward_speed <= max_speed:
+        # In optimal range: linear scaling from 0.5 to 1.0
+        progress = (forward_speed - min_speed) / (max_speed - min_speed)
+        speed_reward = 0.5 + progress * 0.5
+    else:
+        # Above optimal range: maximum reward but don't encourage excessive speed
+        speed_reward = 1.0
+    
+    return float(np.clip(speed_reward, 0.0, 1.0))
