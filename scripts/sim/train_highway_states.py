@@ -106,7 +106,11 @@ config_flags.DEFINE_config_file(
 
 
 # Import shared safety functions
-from highway_safety_utils import safety_reward_fn, calculate_forward_speed_reward, is_vehicle_offroad
+from highway_safety_utils import (
+    safety_reward_fn,
+    calculate_forward_speed_reward,
+    is_vehicle_offroad,
+)
 
 
 def run_trajectory(
@@ -184,7 +188,7 @@ def main(_):
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -1,
-        "reward_speed_range": [30, 45],
+        "reward_speed_range": [10, 50],
         "simulation_frequency": 15,
         "policy_frequency": 5,
         "offroad_terminal": True,  # Enable proper offroad detection
@@ -208,7 +212,9 @@ def main(_):
 
     safety_bonus_coeff = kwargs.pop("safety_penalty", 0.0)
     kwargs.pop("group_name", None)  # Remove group_name before passing to agent
-    kwargs.pop("max_offroad_steps", None)  # Remove max_offroad_steps before passing to agent
+    kwargs.pop(
+        "max_offroad_steps", None
+    )  # Remove max_offroad_steps before passing to agent
 
     agent = globals()[model_cls].create(
         FLAGS.seed, env.observation_space, env.action_space, **kwargs
@@ -271,8 +277,8 @@ def main(_):
     collision_ema = 0.0
 
     # Offroad tracking
-    offroad_step_counter = 0
-    max_offroad_steps = FLAGS.config.get("max_offroad_steps", 20)
+    # offroad_step_counter = 0
+    # max_offroad_steps = FLAGS.config.get("max_offroad_steps", 20)
     offroad_terminations = 0
 
     ema_beta = 3e-4
@@ -329,16 +335,17 @@ def main(_):
         collision_occurred = info["rewards"]["collision_reward"] < 0.0
         collision_indicator = 1.0 if collision_occurred else 0.0
 
+        # TODO(risteon) using standard env termination
         # Check for offroad status and update counter
-        is_offroad = is_vehicle_offroad(env)
-        if is_offroad:
-            offroad_step_counter += 1
-            # Terminate episode if offroad for too long
-            if offroad_step_counter >= max_offroad_steps:
-                done = True
-                offroad_terminations += 1
-        else:
-            offroad_step_counter = 0  # Reset counter when back on road
+        # is_offroad = is_vehicle_offroad(env)
+        # if is_offroad:
+        #     offroad_step_counter += 1
+        #     # Terminate episode if offroad for too long
+        #     if offroad_step_counter >= max_offroad_steps:
+        #         done = True
+        #         offroad_terminations += 1
+        # else:
+        #     offroad_step_counter = 0  # Reset counter when back on road
 
         # Update EMAs for logging
         obs_reshaped = next_observation.reshape(15, 6)  # Reshape flattened obs
@@ -379,8 +386,9 @@ def main(_):
                     wandb_log = {f"training/{decode[k]}": v}
                     wandb.log(wandb_log, step=i)
 
-            # Reset offroad counter on episode end
-            offroad_step_counter = 0
+            is_offroad = is_vehicle_offroad(env)
+            if is_offroad:
+                offroad_terminations += 1
             observation, info = env.reset()
 
         if i >= FLAGS.start_training:
@@ -509,7 +517,7 @@ def main(_):
                 print(f"Cannot save checkpoints: {e}")
 
         pbar.set_description(
-            f"Step {i}, Return: {reward:.2f}, Speed EMA: {speed_ema:.2f}, Safety EMA: {safety_ema:.2f}, Collision EMA: {collision_ema:.3f}, Offroad: {offroad_step_counter}/{max_offroad_steps}"
+            f"Step {i}, Return: {reward:.2f}, Speed EMA: {speed_ema:.2f}, Safety EMA: {safety_ema:.2f}, Collision EMA: {collision_ema:.3f}"
         )
 
         if FLAGS.save_buffer and i % FLAGS.save_buffer_interval == 0:
@@ -521,7 +529,6 @@ def main(_):
             wandb_log["speed_ema"] = speed_ema
             wandb_log["safety_ema"] = safety_ema
             wandb_log["collision_ema"] = collision_ema
-            wandb_log["offroad_step_counter"] = offroad_step_counter
             wandb_log["offroad_terminations"] = offroad_terminations
             if wandb_log:
                 wandb.log(wandb_log, step=i)

@@ -221,6 +221,12 @@ def is_vehicle_offroad(env):
     if vehicle is None:
         return False
 
+    # TODO(risteon) sure that this isn't better?
+    if hasattr(vehicle, "on_road"):
+        if not vehicle.on_road:
+            return True
+        return False
+
     # Method 1: Check lateral distance from lane center (primary method)
     # Access road through unwrapped environment if needed
     road = None
