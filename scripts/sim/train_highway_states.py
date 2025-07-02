@@ -525,7 +525,11 @@ def main(_):
                 config_file = os.path.join(policy_folder, f"config_{i}.pkl")
                 with open(config_file, "wb") as f:
                     pickle.dump(
-                        {"config": config_dict, "training_flags": flags_dict}, f
+                        {
+                            "config": config_dict, 
+                            "training_flags": flags_dict,
+                            "highway_env_config": highway_config  # Save environment configuration
+                        }, f
                     )
                 print(f"Saved checkpoint at step {i} to {policy_folder}")
             except Exception as e:

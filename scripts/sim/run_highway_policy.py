@@ -99,15 +99,20 @@ def load_highway_agent(
             with open(config_file, "rb") as f:
                 config_data = pickle.load(f)
             checkpoint_config = config_data.get("config", None)
+            highway_env_config = config_data.get("highway_env_config", None)
             print("Found config in pickle file")
-            print(f"Config keys: {list(checkpoint_config.keys())}")
-            if "safety_penalty" in checkpoint_config:
-                print(
-                    f"safety_penalty from checkpoint: {checkpoint_config['safety_penalty']}"
-                )
+            if checkpoint_config:
+                print(f"Config keys: {list(checkpoint_config.keys())}")
+                if "safety_penalty" in checkpoint_config:
+                    print(
+                        f"safety_penalty from checkpoint: {checkpoint_config['safety_penalty']}"
+                    )
+            if highway_env_config:
+                print("Found highway environment config in checkpoint")
         except Exception as e:
             print(f"Error loading config pickle: {e}")
             checkpoint_config = None
+            highway_env_config = None
 
     # Fallback: check if config is saved in main checkpoint
     if checkpoint_config is None:
@@ -141,7 +146,7 @@ def load_highway_agent(
     if "q_entropy_lagrange" in param_dict:
         replace_dict["q_entropy_lagrange"] = param_dict["q_entropy_lagrange"]
 
-    return agent.replace(**replace_dict), checkpoint_config
+    return agent.replace(**replace_dict), checkpoint_config, highway_env_config
 
 
 def run_highway_trajectory(
@@ -155,7 +160,7 @@ def run_highway_trajectory(
     """
     Run a single highway trajectory with the agent and collect metrics.
     """
-    obs, _ = env.reset()
+    obs, _ = 
     if hasattr(agent, "env_reset"):
         agent = agent.env_reset(obs)
 
@@ -420,7 +425,48 @@ def evaluate_highway_policy(
 
 
 def main(_):
-    # Highway environment setup
+    # Create agent first to load checkpoint config
+    kwargs = dict(FLAGS.config)
+    model_cls = kwargs.pop("model_cls")
+    kwargs.pop("group_name", None)  # Remove group_name before passing to agent
+    kwargs.pop("safety_penalty", None)  # Remove safety_penalty if present
+    kwargs.pop("max_offroad_steps", None)  # Remove max_offroad_steps before passing to agent
+
+    # Default highway environment configuration for initial env creation
+    temp_highway_config = {
+        "observation": {
+            "type": "Kinematics",
+            "vehicles_count": 15,
+            "features": ["presence", "x", "y", "vx", "vy", "heading"],
+            "normalize": False,
+        },
+        "action": {"type": "ContinuousAction"},
+        "lanes_count": 4,
+        "vehicles_count": 50,
+        "duration": 40,
+        "initial_spacing": 2,
+        "collision_reward": -1,
+        "reward_speed_range": [30, 45],
+        "simulation_frequency": 15,
+        "policy_frequency": 5,
+        "offroad_terminal": False,
+    }
+    
+    # Temporarily create environment to get observation/action spaces for agent creation
+    temp_env = gym.make(FLAGS.env_name, config=temp_highway_config, render_mode=None)
+    temp_env = FlattenObservation(temp_env)
+    
+    agent = globals()[model_cls].create(
+        FLAGS.seed, temp_env.observation_space, temp_env.action_space, **kwargs
+    )
+    temp_env.close()
+
+    # Load trained policy and get checkpoint config
+    policy_path = os.path.abspath(FLAGS.policy_file)
+    print(f"Loading policy from: {policy_path}")
+    agent, checkpoint_config, checkpoint_highway_config = load_highway_agent(agent, policy_path)
+
+    # Default highway environment configuration
     highway_config = {
         "observation": {
             "type": "Kinematics",
@@ -434,46 +480,54 @@ def main(_):
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -1,
-        "reward_speed_range": [30, 45],
+        "reward_speed_range": [30, 45],  # Default, may be overridden by checkpoint
         "simulation_frequency": 15,
         "policy_frequency": 5,
         "offroad_terminal": False,  # Keep False to avoid early termination, use our enhanced detection
     }
 
-    # Create environment
-    render_mode = "rgb_array" if FLAGS.render else None
-    env = gym.make(FLAGS.env_name, config=highway_config, render_mode=render_mode)
-    env = FlattenObservation(env)  # Flatten (15, 6) -> (90,)
-    env = TimeLimit(env, max_episode_steps=FLAGS.max_steps)
-
-    # Create agent
-    kwargs = dict(FLAGS.config)
-    model_cls = kwargs.pop("model_cls")
-    kwargs.pop("group_name", None)  # Remove group_name before passing to agent
-    kwargs.pop("safety_penalty", None)  # Remove safety_penalty if present
-    kwargs.pop(
-        "max_offroad_steps", None
-    )  # Remove max_offroad_steps before passing to agent
-
-    agent = globals()[model_cls].create(
-        FLAGS.seed, env.observation_space, env.action_space, **kwargs
-    )
-
-    # Load trained policy
-    policy_path = os.path.abspath(FLAGS.policy_file)
-    print(f"Loading policy from: {policy_path}")
-    agent, checkpoint_config = load_highway_agent(agent, policy_path)
-
-    # Use checkpoint config if available, otherwise fall back to FLAGS.config
+    # Override environment config with checkpoint configs if available
     if checkpoint_config is not None:
         print("Using config from checkpoint")
-        # Extract safety_penalty from checkpoint config for evaluation
+        # Extract training config for evaluation
         safety_bonus_coeff = checkpoint_config.get("safety_penalty", 0.01)
         max_offroad_steps = checkpoint_config.get("max_offroad_steps", 20)
     else:
         print("Using config from command line flags")
         safety_bonus_coeff = FLAGS.config.get("safety_penalty", 0.01)
         max_offroad_steps = FLAGS.config.get("max_offroad_steps", 20)
+
+    # Use checkpoint highway environment config if available (priority over algorithm config)
+    if checkpoint_highway_config is not None:
+        print("Using highway environment config from checkpoint")
+        # Update the highway config with values from checkpoint
+        for key, value in checkpoint_highway_config.items():
+            highway_config[key] = value
+            print(f"Using {key} from checkpoint highway config: {value}")
+    else:
+        print("No highway environment config in checkpoint, using defaults")
+        
+        # Fallback: check algorithm config for environment settings (legacy)
+        if checkpoint_config is not None:
+            env_overrides = {
+                "reward_speed_range": checkpoint_config.get("reward_speed_range"),
+                "collision_reward": checkpoint_config.get("collision_reward"),
+                "right_lane_reward": checkpoint_config.get("right_lane_reward"), 
+                "high_speed_reward": checkpoint_config.get("high_speed_reward"),
+                "lane_change_reward": checkpoint_config.get("lane_change_reward"),
+                "normalize_reward": checkpoint_config.get("normalize_reward"),
+            }
+            
+            for key, value in env_overrides.items():
+                if value is not None:
+                    highway_config[key] = value
+                    print(f"Using {key} from checkpoint algorithm config: {value}")
+
+    # Create environment with potentially updated config
+    render_mode = "rgb_array" if FLAGS.render else None
+    env = gym.make(FLAGS.env_name, config=highway_config, render_mode=render_mode)
+    env = FlattenObservation(env)  # Flatten (15, 6) -> (90,)
+    env = TimeLimit(env, max_episode_steps=FLAGS.max_steps)
 
     # Create output directory
     Path(FLAGS.video_output_dir).mkdir(parents=True, exist_ok=True)
