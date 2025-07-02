@@ -59,9 +59,9 @@ class SACLearner(Agent):
         pytree_node=False
     )  # See M in RedQ https://arxiv.org/abs/2101.05982
     backup_entropy: bool = struct.field(pytree_node=False)
-    initialize_params: Callable[
-        [jax.Array], Dict[str, TrainState]
-    ] = struct.field(pytree_node=False)
+    initialize_params: Callable[[jax.Array], Dict[str, TrainState]] = struct.field(
+        pytree_node=False
+    )
     pixel_embeddings_key: Optional[str] = struct.field(pytree_node=False)
 
     @classmethod
@@ -149,7 +149,13 @@ class SACLearner(Agent):
                 "critic": TrainState.create(
                     apply_fn=critic_def.apply,
                     params=critic_params,
-                    tx=optax.adam(learning_rate=critic_lr) if critic_weight_decay is None else optax.adamw(learning_rate=critic_lr, weight_decay=critic_weight_decay),
+                    tx=(
+                        optax.adam(learning_rate=critic_lr)
+                        if critic_weight_decay is None
+                        else optax.adamw(
+                            learning_rate=critic_lr, weight_decay=critic_weight_decay
+                        )
+                    ),
                 ),
                 "target_critic": TrainState.create(
                     apply_fn=critic_def.apply,
@@ -352,10 +358,10 @@ class SACLearner(Agent):
                 x = (-jnp.ones(()), jnp.ones(()))
 
             if len(x[0].shape) == 0:
-                x = jax.tree_map(lambda y: jnp.repeat(y[None], action_dim, axis=0), x)
+                x = jax.tree.map(lambda y: jnp.repeat(y[None], action_dim, axis=0), x)
 
             if len(x[0].shape) == 1:
-                x = jax.tree_map(lambda y: jnp.repeat(y[None], batch_size, axis=0), x)
+                x = jax.tree.map(lambda y: jnp.repeat(y[None], batch_size, axis=0), x)
 
             return x
 
@@ -366,15 +372,21 @@ class SACLearner(Agent):
 
         # Critic update
         minibatch_size = batch_size // utd_ratio
+
         def reshape_first_dim(x: jax.Array):
             return jnp.reshape(x, (utd_ratio, minibatch_size, *x.shape[1:]))
-        batched_batch = jax.tree_map(reshape_first_dim, batch)
-        batched_output_range = jax.tree_map(reshape_first_dim, output_range)
-        batched_output_range_next = jax.tree_map(reshape_first_dim, output_range_next)
 
-        def update_step(agent: SACLearner, data: Tuple[DatasetDict, Tuple[jax.Array, jax.Array]]) -> SACLearner:
+        batched_batch = jax.tree.map(reshape_first_dim, batch)
+        batched_output_range = jax.tree.map(reshape_first_dim, output_range)
+        batched_output_range_next = jax.tree.map(reshape_first_dim, output_range_next)
+
+        def update_step(
+            agent: SACLearner, data: Tuple[DatasetDict, Tuple[jax.Array, jax.Array]]
+        ) -> SACLearner:
             batch, next_output_range = data
-            new_agent, critic_info = agent.update_critic(batch, output_range=next_output_range)
+            new_agent, critic_info = agent.update_critic(
+                batch, output_range=next_output_range
+            )
             return new_agent, critic_info
 
         new_agent, critic_infos = jax.lax.scan(
@@ -383,14 +395,12 @@ class SACLearner(Agent):
             (batched_batch, batched_output_range_next),
         )
 
-        critic_info = jax.tree_map(
-            lambda data: jnp.mean(data, axis=0), critic_infos
-        )
+        critic_info = jax.tree.map(lambda data: jnp.mean(data, axis=0), critic_infos)
 
         # Only update the actor on one minibatch
         new_agent, actor_info = new_agent.update_actor(
-            jax.tree_map(lambda x: x[0], batched_batch),
-            jax.tree_map(lambda x: x[0], batched_output_range)
+            jax.tree.map(lambda x: x[0], batched_batch),
+            jax.tree.map(lambda x: x[0], batched_output_range),
         )
 
         if update_temperature:
