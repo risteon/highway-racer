@@ -35,6 +35,21 @@ from highway_safety_utils import (
 warnings.filterwarnings("ignore")
 
 
+class ConstantActionAgent(AgentInterface):
+    """Custom agent that drives with a constant action."""
+
+    def __init__(self, action):
+        self.action = np.array(action)
+
+    def get_action(self, obs):
+        """Return the constant action."""
+        return self.action
+
+    def reset(self, obs):
+        """Reset the agent (no state to reset)."""
+        pass
+
+
 class ForwardStopBackwardAgent(AgentInterface):
     """Custom agent that drives forward, stops, then drives backward."""
 
@@ -80,8 +95,8 @@ def create_highway_environment(enable_rendering=False):
         "reward_speed_range": [20, 50],  # Training config range
         "simulation_frequency": 15,
         "policy_frequency": 5,
-        "offroad_terminal": False,  # Disable termination for this analysis
-        "collision_terminal": False,  # Disable collision termination
+        "offroad_terminal": True,  # Disable termination for this analysis
+        # "collision_terminal": False,  # Disable collision termination
         "normalize_reward": False,
     }
 
@@ -117,7 +132,8 @@ def analyze_forward_stop_backward_trajectory(
     print()
 
     # Create forward-stop-backward agent
-    agent = ForwardStopBackwardAgent()
+    # agent = ForwardStopBackwardAgent()
+    agent = ConstantActionAgent(action=[0.0, 0.2])
 
     # Set video output path
     video_path = None
