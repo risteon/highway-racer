@@ -206,6 +206,7 @@ def main(_):
         "simulation_frequency": 15,
         "policy_frequency": 5,
         "normalize_reward": False,
+        "offroad_terminal": True,
     }
 
     # Set render mode if video recording is enabled
@@ -323,6 +324,9 @@ def main(_):
         else:
             action = np.clip(action, env.action_space.low, env.action_space.high)
 
+        # DEBUG: Go right
+        # action = np.asarray([0.0, 0.2], np.float32)
+
         if FLAGS.ramp_action == "linear":
             action_max[1] = max_action_schedule(i)
 
@@ -439,6 +443,15 @@ def main(_):
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
                     wandb.log({f"training/{k}": v}, step=i)
+
+                wandb.log(
+                    {
+                        "training/action_acc": action[0],
+                        "training/action_steer": action[1],
+                        "training/ego_speed": ego_speed,
+                    },
+                    step=i,
+                )
 
             if (
                 reset_interval is not None
