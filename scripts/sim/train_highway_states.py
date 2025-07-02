@@ -60,15 +60,15 @@ flags.DEFINE_string(
     "expert_replay_buffer", "", "(Optional) Expert replay buffer pickle file."
 )
 flags.DEFINE_integer("seed", 42, "Random seed.")
-flags.DEFINE_integer("eval_episodes", 32, "Number of episodes used for evaluation.")
-flags.DEFINE_integer("log_interval", 250, "Logging interval.")
-flags.DEFINE_integer("eval_interval", 5000, "Eval interval.")
+flags.DEFINE_integer("eval_episodes", 16, "Number of episodes used for evaluation.")
+flags.DEFINE_integer("log_interval", 500, "Logging interval.")
+flags.DEFINE_integer("eval_interval", 20000, "Eval interval.")
 flags.DEFINE_integer("batch_size", 128, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
-    "start_training", int(1e3), "Number of training steps to start training."
+    "start_training", int(2e3), "Number of training steps to start training."
 )
-flags.DEFINE_integer("replay_buffer_size", 100000, "Capacity of the replay buffer.")
+flags.DEFINE_integer("replay_buffer_size", 10000, "Capacity of the replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("save_video", False, "Save videos during evaluation.")
 flags.DEFINE_boolean("record_video", False, "Record videos during training.")
@@ -201,9 +201,9 @@ def main(_):
         "vehicles_count": 50,
         "duration": 40,  # seconds
         "initial_spacing": 2,
-        # "collision_reward": -5.0,
+        "collision_reward": -5.0,
         # debug: no collision penalty
-        "collision_reward": 0.0,
+        # "collision_reward": 0.0,
         "right_lane_reward": 0.01,
         "high_speed_reward": 0.7,
         "lane_change_reward": 0.0,
