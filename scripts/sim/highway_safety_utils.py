@@ -334,7 +334,7 @@ def debug_vehicle_position(env):
     return debug_info
 
 
-def calculate_forward_speed_reward(env, reward_speed_range=[30, 45]):
+def calculate_forward_speed_reward(env, reward_speed_range=[20, 50]):
     """
     Calculate speed reward that only rewards forward driving.
 
@@ -371,7 +371,7 @@ def calculate_training_reward(
     base_reward,
     info,
     safety_bonus_coeff=0.01,
-    reward_speed_range=[30, 45],
+    reward_speed_range=[20, 50],
     speed_weight=0.4,
     next_obs=None,
 ):

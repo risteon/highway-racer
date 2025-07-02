@@ -201,11 +201,12 @@ def main(_):
         "vehicles_count": 50,
         "duration": 40,  # seconds
         "initial_spacing": 2,
-        "collision_reward": -1,
+        "collision_reward": -10.0,
         "reward_speed_range": [20, 50],
         "simulation_frequency": 15,
         "policy_frequency": 5,
         "offroad_terminal": True,  # Enable proper offroad detection
+        "normalize_reward": False,
     }
 
     # Set render mode if video recording is enabled
@@ -526,10 +527,11 @@ def main(_):
                 with open(config_file, "wb") as f:
                     pickle.dump(
                         {
-                            "config": config_dict, 
+                            "config": config_dict,
                             "training_flags": flags_dict,
-                            "highway_env_config": highway_config  # Save environment configuration
-                        }, f
+                            "highway_env_config": highway_config,  # Save environment configuration
+                        },
+                        f,
                     )
                 print(f"Saved checkpoint at step {i} to {policy_folder}")
             except Exception as e:
