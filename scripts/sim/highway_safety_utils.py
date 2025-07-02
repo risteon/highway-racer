@@ -8,7 +8,7 @@ for both training and evaluation scripts.
 import numpy as np
 
 
-def safety_reward_fn(obs, env=None, info=None):
+def safety_reward_fn(obs, env=None):
     """
     Enhanced safety reward for highway driving.
     Penalizes collision risks and offroad violations.
@@ -364,3 +364,68 @@ def calculate_forward_speed_reward(env, reward_speed_range=[30, 45]):
     speed_reward = (forward_speed - min_speed) / (max_speed - min_speed)
 
     return float(np.clip(speed_reward, 0.0, 1.0))
+
+
+def calculate_training_reward(
+    env,
+    base_reward,
+    info,
+    safety_bonus_coeff=0.01,
+    reward_speed_range=[30, 45],
+    speed_weight=0.4,
+    next_obs=None,
+):
+    """
+    Calculate the complete training reward used in RACER highway training.
+
+    This function combines:
+    1. Base environment reward
+    2. Forward-only speed reward (fixes highway-env backward driving bug)
+    3. Safety reward (collision risk + offroad penalties)
+
+    Args:
+        env: Highway environment instance
+        base_reward: Raw reward from highway-env step
+        info: Environment info dict containing reward components
+        safety_bonus_coeff: Weight for safety reward component (default: 0.01)
+        reward_speed_range: [min_speed, max_speed] for speed reward (default: [30, 45])
+        speed_weight: Weight for speed component in highway-env (default: 0.4)
+
+    Returns:
+        training_reward: Complete reward used in training
+        components: Dict with reward breakdown for logging/analysis
+    """
+    # Fix highway-env's backward driving reward bug
+    # Replace highway-env's speed reward with forward-only speed reward
+    original_speed_reward = info["rewards"]["high_speed_reward"]
+    forward_speed_reward = calculate_forward_speed_reward(env, reward_speed_range)
+
+    # Adjust reward: remove original speed component and add forward-only version
+    # Highway-env uses 0.4 weight for speed reward in default config
+    corrected_reward = (
+        base_reward
+        - original_speed_reward * speed_weight
+        + forward_speed_reward * speed_weight
+    )
+
+    # Compute safety reward (collision risk + offroad penalties)
+    if next_obs is not None:
+        safety_reward = safety_reward_fn(next_obs, env)
+    else:
+        # Fallback to offroad penalty only if observation not available
+        safety_reward = _calculate_offroad_penalty(env)
+
+    # Final training reward
+    training_reward = corrected_reward + safety_reward * safety_bonus_coeff
+
+    # Return breakdown for analysis
+    components = {
+        "base_reward": float(base_reward),
+        "corrected_reward": float(corrected_reward),
+        "original_speed_reward": float(original_speed_reward),
+        "forward_speed_reward": float(forward_speed_reward),
+        "safety_reward": float(safety_reward),
+        "training_reward": float(training_reward),
+    }
+
+    return training_reward, components

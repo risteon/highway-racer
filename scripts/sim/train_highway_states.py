@@ -110,6 +110,7 @@ from highway_safety_utils import (
     safety_reward_fn,
     calculate_forward_speed_reward,
     is_vehicle_offroad,
+    calculate_training_reward,
 )
 
 
@@ -119,6 +120,7 @@ def run_trajectory(
     max_steps=1000,
     video: bool = False,
     output_range: Tuple[float, float] = None,
+    safety_bonus_coeff=0.01,
 ):
     obs, _ = env.reset()
     if hasattr(agent, "env_reset"):
@@ -135,7 +137,11 @@ def run_trajectory(
         action, agent = agent.sample_actions(obs, output_range=output_range)
         next_obs, reward, done, truncated, info = env.step(action)
 
-        episode_return += reward
+        # Use shared training reward calculation
+        training_reward, _ = calculate_training_reward(
+            env, reward, info, safety_bonus_coeff, next_obs=next_obs
+        )
+        episode_return += training_reward
         episode_length += 1
 
         obs = next_obs
@@ -147,14 +153,22 @@ def run_trajectory(
 
 
 def evaluate(
-    agent, eval_env, num_episodes: int, output_range: Tuple[float, float] = None
+    agent,
+    eval_env,
+    num_episodes: int,
+    output_range: Tuple[float, float] = None,
+    safety_bonus_coeff=0.01,
 ):
     episode_returns = []
     episode_lengths = []
 
     for i in range(num_episodes):
         images, episode_return, episode_length = run_trajectory(
-            agent, eval_env, video=False, output_range=output_range
+            agent,
+            eval_env,
+            video=False,
+            output_range=output_range,
+            safety_bonus_coeff=safety_bonus_coeff,
         )
         episode_returns.append(episode_return)
         episode_lengths.append(episode_length)
@@ -188,7 +202,7 @@ def main(_):
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -1,
-        "reward_speed_range": [10, 50],
+        "reward_speed_range": [20, 50],
         "simulation_frequency": 15,
         "policy_frequency": 5,
         "offroad_terminal": True,  # Enable proper offroad detection
@@ -312,26 +326,17 @@ def main(_):
 
         next_observation, reward, done, truncated, info = env.step(action)
 
-        # Fix highway-env's backward driving reward bug
-        # Replace highway-env's speed reward with forward-only speed reward
-        original_speed_reward = info["rewards"]["high_speed_reward"]
-        forward_speed_reward = calculate_forward_speed_reward(
-            env, reward_speed_range=[30, 45]
+        # Use shared training reward calculation
+        training_reward, reward_components = calculate_training_reward(
+            env,
+            reward,
+            info,
+            safety_bonus_coeff,
+            reward_speed_range=highway_config["reward_speed_range"],
+            next_obs=next_observation,
         )
-
-        # Adjust reward: remove original speed component and add forward-only version
-        # Highway-env uses 0.4 weight for speed reward in default config
-        # TODO(risteon) fixable?
-        speed_weight = 0.4
-        reward = (
-            reward
-            - original_speed_reward * speed_weight
-            + forward_speed_reward * speed_weight
-        )
-
-        # Compute safety reward
-        safety_bonus = safety_reward_fn(next_observation, env, info)
-        reward += safety_bonus * safety_bonus_coeff
+        reward = training_reward
+        safety_bonus = reward_components["safety_reward"]
 
         # Check for collision from highway-env reward components
         collision_occurred = info["rewards"]["collision_reward"] < 0.0
@@ -445,7 +450,13 @@ def main(_):
                     agent = agent.reset(exclude=["critic", "target_critic"])
 
         if i % FLAGS.eval_interval == 0:
-            evaluate(agent, eval_env, FLAGS.eval_episodes, output_range=output_range)
+            evaluate(
+                agent,
+                eval_env,
+                FLAGS.eval_episodes,
+                output_range=output_range,
+                safety_bonus_coeff=safety_bonus_coeff,
+            )
 
         # Save checkpoints at specified intervals
         if i % FLAGS.save_checkpoint_interval == 0 or i == 100:

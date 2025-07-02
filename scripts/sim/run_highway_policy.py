@@ -54,6 +54,7 @@ from highway_safety_utils import (
     is_vehicle_offroad,
     debug_vehicle_position,
     calculate_forward_speed_reward,
+    calculate_training_reward,
 )
 
 
@@ -259,13 +260,15 @@ def run_highway_trajectory(
         # Take environment step
         next_obs, reward, done, truncated, info = env.step(action)
 
+        # Use shared training reward calculation
+        training_reward, reward_components = calculate_training_reward(
+            env, reward, info, safety_bonus_coeff, next_obs=next_obs
+        )
+        safety_reward = reward_components["safety_reward"]
+        
         # Calculate safety metrics
-        safety_reward = safety_reward_fn(obs, env)
         if safety_reward < -0.5:  # Threshold for safety violation
             safety_violations += 1
-
-        # Calculate training reward (env + safety, as used in training)
-        training_reward = reward + safety_reward * safety_bonus_coeff
 
         # Track offroad status
         # is_offroad = is_vehicle_offroad(env)
