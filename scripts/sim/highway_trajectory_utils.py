@@ -208,9 +208,6 @@ def run_highway_trajectory(
         # Take environment step
         next_obs, env_reward, done, truncated, info = env.step(action)
 
-        if next_obs[3] > 39.6:
-            print("x")
-
         # Calculate training reward using shared function
         training_reward, reward_components = calculate_training_reward(
             env,
