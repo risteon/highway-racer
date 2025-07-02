@@ -24,6 +24,7 @@ from highway_trajectory_utils import (
     run_highway_trajectory,
     ZeroActionAgent,
     LearnedPolicyAgent,
+    AgentInterface,
 )
 
 # Import shared safety functions
@@ -32,6 +33,32 @@ from highway_safety_utils import (
 )
 
 warnings.filterwarnings("ignore")
+
+
+class ForwardStopBackwardAgent(AgentInterface):
+    """Custom agent that drives forward, stops, then drives backward."""
+
+    def __init__(self):
+        self.step_count = 0
+
+    def get_action(self, obs):
+        """Get action based on current step: forward -> stop -> backward."""
+        if self.step_count < 100:
+            # Forward phase: moderate acceleration
+            action = np.array([0.3, 0.0])  # [steering=0, acceleration=0.3]
+        elif self.step_count < 120:
+            # Stopping phase: strong deceleration
+            action = np.array([-0.8, 0.0])  # [steering=0, acceleration=-0.8]
+        else:
+            # Backward phase: negative acceleration to go backward
+            action = np.array([-0.5, 0.0])  # [steering=0, acceleration=-0.5]
+
+        self.step_count += 1
+        return action
+
+    def reset(self, obs):
+        """Reset step counter for new episode."""
+        self.step_count = 0
 
 
 def create_highway_environment(enable_rendering=False):
@@ -45,36 +72,43 @@ def create_highway_environment(enable_rendering=False):
         },
         "action": {"type": "ContinuousAction"},
         "lanes_count": 4,
-        "vehicles_count": 50,
+        # "vehicles_count": 50,
+        "vehicles_count": 1,
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -10.0,
         "reward_speed_range": [20, 50],  # Training config range
         "simulation_frequency": 15,
         "policy_frequency": 5,
-        "offroad_terminal": True,  # Enable proper offroad detection
+        "offroad_terminal": False,  # Disable termination for this analysis
+        "collision_terminal": False,  # Disable collision termination
         "normalize_reward": False,
     }
 
     render_mode = "rgb_array" if enable_rendering else None
     env = gym.make("highway-v0", config=highway_config, render_mode=render_mode)
     env = FlattenObservation(env)
-    env = TimeLimit(env, max_episode_steps=200)  # Shorter episode for debugging
+    env = TimeLimit(env, max_episode_steps=200)  # Allow enough steps for full sequence
 
     return env, highway_config
 
 
-def analyze_zero_action_trajectory(
+def analyze_forward_stop_backward_trajectory(
     env, highway_config, safety_bonus_coeff=0.0, max_steps=1000, enable_video=False
 ):
     """
-    Analyze trajectory with zero actions (straight driving) to debug reward function.
+    Analyze trajectory with forward-stop-backward sequence to debug reward function behavior.
 
-    This isolates the reward behavior by removing agent policy effects.
+    Agent drives forward for 100 steps, decelerates to stop, then drives backward.
+    This tests reward behavior across different driving scenarios and speeds.
     """
     print("=" * 80)
-    print("HIGHWAY REWARD ANALYSIS - STRAIGHT DRIVING (ZERO ACTIONS)")
+    print("HIGHWAY REWARD ANALYSIS - FORWARD-STOP-BACKWARD SEQUENCE")
     print("=" * 80)
+    print(f"Agent behavior:")
+    print(f"  Steps 0-99: Forward acceleration (action=[0.0, 0.3])")
+    print(f"  Steps 100-119: Strong deceleration (action=[0.0, -0.8])")
+    print(f"  Steps 120+: Backward acceleration (action=[0.0, -0.5])")
     print(f"Environment config:")
     for key, value in highway_config.items():
         if "reward" in key or "speed" in key or "collision" in key:
@@ -82,13 +116,13 @@ def analyze_zero_action_trajectory(
     print(f"Safety bonus coefficient: {safety_bonus_coeff}")
     print()
 
-    # Create zero action agent
-    agent = ZeroActionAgent()
+    # Create forward-stop-backward agent
+    agent = ForwardStopBackwardAgent()
 
     # Set video output path
     video_path = None
     if enable_video:
-        video_path = "./evaluation/debug_videos/zero_action_analysis.mp4"
+        video_path = "./evaluation/debug_videos/forward_stop_backward_analysis.mp4"
 
     # Run trajectory with debug analysis
     trajectory_metrics, images = run_highway_trajectory(
@@ -261,12 +295,12 @@ def main():
         enable_rendering=True
     )  # Enable rendering for video
 
-    print("Running zero action analysis...")
+    print("Running forward-stop-backward analysis...")
     # Use same safety coefficient as in training config
     safety_bonus_coeff = 0.0  # Start with 0 to isolate base rewards
 
-    trajectory_metrics = analyze_zero_action_trajectory(
-        env, highway_config, safety_bonus_coeff, max_steps=1000, enable_video=True
+    trajectory_metrics = analyze_forward_stop_backward_trajectory(
+        env, highway_config, safety_bonus_coeff, max_steps=200, enable_video=True
     )
 
     env.close()
