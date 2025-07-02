@@ -30,7 +30,7 @@ def get_config():
     config.num_atoms = 101  # Sufficient for highway reward range
     config.q_min = -50.0  # Adjusted for highway rewards (crashes, penalties)
     config.q_max = 50.0  # Adjusted for highway rewards (goal completion)
-    config.cvar_risk = 0.8  # High risk sensitivity for highway safety
+    config.cvar_risk = 0.9
 
     config.critic_weight_decay = 1e-3
     config.critic_layer_norm = True
@@ -51,12 +51,7 @@ def get_config():
 
     # Highway-specific safety penalty
     # config.safety_penalty = 0.1  # Moderate safety bonus coefficient
-    config.safety_penalty = 0.01  # Small safety bonus coefficient
+    # config.safety_penalty = 0.01  # Small safety bonus coefficient
     config.safety_penalty = 0.0  # Small safety bonus coefficient
-
-    # Offroad termination settings
-    config.max_offroad_steps = (
-        20  # Terminate episode after 20 consecutive offroad steps
-    )
 
     return config
