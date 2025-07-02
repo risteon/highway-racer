@@ -115,6 +115,11 @@ def run_highway_trajectory(
         )
         print("-" * 100)
 
+    # Initialize reward components for first frame
+    last_env_reward = 0.0
+    last_reward_components = {"speed_reward": 0.0, "collision_reward": 0.0, "safety_reward": 0.0}
+    last_info = {}
+
     for step in range(max_steps):
         # Get action from agent
         action = agent.get_action(obs)
@@ -138,7 +143,6 @@ def run_highway_trajectory(
                     # Calculate safety metrics for overlay
                     safety_reward = safety_reward_fn(obs, env)
                     is_offroad = is_vehicle_offroad(env)
-                    debug_info = debug_vehicle_position(env)
 
                     # Grid layout parameters
                     row_height = 20
@@ -146,33 +150,25 @@ def run_highway_trajectory(
                     start_x = 10
                     start_y = 10
 
+                    # Get reward components from last step (or defaults for first step)
+                    speed_reward = last_info.get("rewards", {}).get("high_speed_reward", 0.0)
+                    right_reward = last_info.get("rewards", {}).get("right_lane_reward", 0.0)
+                    collision_reward = last_info.get("rewards", {}).get("collision_reward", 0.0)
+                    last_safety_reward = last_reward_components.get("safety_reward", 0.0)
+
                     # Define all info items to display
                     info_items = [
                         f"Step: {step}",
                         f"Action: [{action[0]:.1f}, {action[1]:.1f}]",
                         f"Speed: {ego_speed:.2f} m/s",
-                        f"Safety: {safety_reward:.3f}",
                         f"Env Return: {episode_return:.2f}",
                         f"Training Return: {training_return:.2f}",
                         f"Offroad: {'YES' if is_offroad else 'NO'}",
+                        f"Speed Rew: {speed_reward:.3f}",
+                        f"Right Rew: {right_reward:.3f}",
+                        f"Collision Rew: {collision_reward:.3f}",
+                        f"Safety Rew: {last_safety_reward:.3f}",
                     ]
-
-                    # Add lateral positioning info if available
-                    if "lateral" in debug_info and "lane_width" in debug_info:
-                        lateral = debug_info["lateral"]
-                        lane_width = debug_info["lane_width"]
-                        margin = lateral - lane_width / 2
-                        info_items.extend(
-                            [
-                                f"Lateral: {lateral:.2f}m",
-                                f"Lane Width: {lane_width:.2f}m",
-                                f"Margin: {margin:.2f}m",
-                            ]
-                        )
-
-                    # Add on_road property if available
-                    if "on_road_property" in debug_info:
-                        info_items.append(f"OnRoad: {debug_info['on_road_property']}")
 
                     # Arrange items in 3-row grid
                     for i, item in enumerate(info_items):
@@ -187,19 +183,10 @@ def run_highway_trajectory(
                             text_color = (255, 0, 0)  # Red for offroad
                         elif "Offroad: NO" in item:
                             text_color = (0, 255, 0)  # Green for on road
-                        elif (
-                            "Margin:" in item
-                            and "lateral" in debug_info
-                            and "lane_width" in debug_info
-                        ):
-                            # Red if outside lane boundaries, green if inside
-                            if (
-                                abs(debug_info["lateral"])
-                                > debug_info["lane_width"] / 2
-                            ):
-                                text_color = (255, 0, 0)
-                            else:
-                                text_color = (0, 255, 0)
+                        elif "Collision Rew:" in item and collision_reward < 0:
+                            text_color = (255, 0, 0)  # Red for collision penalty
+                        elif "Safety Rew:" in item and last_safety_reward < 0:
+                            text_color = (255, 165, 0)  # Orange for safety penalty
 
                         draw.text((x, y), item, fill=text_color)
 
@@ -207,6 +194,10 @@ def run_highway_trajectory(
 
         # Take environment step
         next_obs, env_reward, done, truncated, info = env.step(action)
+
+        # Store info for next frame's overlay
+        last_env_reward = env_reward
+        last_info = info
 
         # Calculate training reward using shared function
         training_reward, reward_components = calculate_training_reward(
@@ -218,6 +209,9 @@ def run_highway_trajectory(
             next_obs=next_obs,
         )
         safety_reward = reward_components["safety_reward"]
+        
+        # Store reward components for next frame's overlay
+        last_reward_components = reward_components
 
         # Extract vehicle information from observation for analysis
         obs_reshaped = obs.reshape(15, 6)
