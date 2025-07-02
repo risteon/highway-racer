@@ -397,16 +397,17 @@ def calculate_training_reward(
     """
     # Fix highway-env's backward driving reward bug
     # Replace highway-env's speed reward with forward-only speed reward
-    original_speed_reward = info["rewards"]["high_speed_reward"]
-    forward_speed_reward = calculate_forward_speed_reward(env, reward_speed_range)
+    # original_speed_reward = info["rewards"]["high_speed_reward"]
+    # TODO(risteon) we don't need a fix!
+    # forward_speed_reward = calculate_forward_speed_reward(env, reward_speed_range)
 
     # Adjust reward: remove original speed component and add forward-only version
     # Highway-env uses 0.4 weight for speed reward in default config
-    corrected_reward = (
-        base_reward
-        - original_speed_reward * speed_weight
-        + forward_speed_reward * speed_weight
-    )
+    # corrected_reward = (
+    #     base_reward
+    #     - original_speed_reward * speed_weight
+    #     + forward_speed_reward * speed_weight
+    # )
 
     # Compute safety reward (collision risk + offroad penalties)
     if next_obs is not None:
@@ -416,14 +417,14 @@ def calculate_training_reward(
         safety_reward = _calculate_offroad_penalty(env)
 
     # Final training reward
-    training_reward = corrected_reward + safety_reward * safety_bonus_coeff
+    training_reward = base_reward + safety_reward * safety_bonus_coeff
 
     # Return breakdown for analysis
     components = {
         "base_reward": float(base_reward),
-        "corrected_reward": float(corrected_reward),
-        "original_speed_reward": float(original_speed_reward),
-        "forward_speed_reward": float(forward_speed_reward),
+        # "corrected_reward": float(corrected_reward),
+        # "original_speed_reward": float(original_speed_reward),
+        # "forward_speed_reward": float(forward_speed_reward),
         "safety_reward": float(safety_reward),
         "training_reward": float(training_reward),
     }
