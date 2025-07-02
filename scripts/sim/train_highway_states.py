@@ -202,10 +202,9 @@ def main(_):
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -10.0,
-        "reward_speed_range": [20, 50],
+        "reward_speed_range": [20, 40],
         "simulation_frequency": 15,
         "policy_frequency": 5,
-        "offroad_terminal": True,  # Enable proper offroad detection
         "normalize_reward": False,
     }
 
@@ -216,7 +215,8 @@ def main(_):
     # Apply RecordEpisodeStatistics FIRST to ensure episode info propagation
     env = RecordEpisodeStatistics(env)
     env = FlattenObservation(env)  # Flatten (15, 6) -> (90,)
-    env = TimeLimit(env, max_episode_steps=1000)
+    # time limit will be 40s time 5Hz = 200 steps
+    # env = TimeLimit(env, max_episode_steps=1000)
 
     eval_env = gym.make(FLAGS.env_name, config=highway_config, render_mode="rgb_array")
     eval_env = FlattenObservation(eval_env)  # Flatten (15, 6) -> (90,)
@@ -263,8 +263,6 @@ def main(_):
             }
         )
 
-    observation, info = env.reset()
-
     wandb.init(
         project=FLAGS.wandb_project,
         notes=FLAGS.comment,
@@ -309,6 +307,9 @@ def main(_):
         disable=not FLAGS.tqdm,
         dynamic_ncols=True,
     )
+
+    observation, info = env.reset()
+
     for i in pbar:
         if hasattr(agent, "target_entropy") and hasattr(agent.target_entropy, "set"):
             agent = agent.replace(target_entropy=-env.action_space.shape[-1])
@@ -339,8 +340,9 @@ def main(_):
         reward = training_reward
         safety_bonus = reward_components["safety_reward"]
 
-        # Check for collision from highway-env reward components
-        collision_occurred = info["rewards"]["collision_reward"] < 0.0
+        # Check for collision from highway-env reward components. Collision reward is positive if collision occurred,
+        # then scaled with weight for total reward.
+        collision_occurred = info["rewards"]["collision_reward"] > 0.0
         collision_indicator = 1.0 if collision_occurred else 0.0
         if collision_occurred:
             collision_counter += 1
