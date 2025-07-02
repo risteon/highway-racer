@@ -201,7 +201,9 @@ def main(_):
         "vehicles_count": 50,
         "duration": 40,  # seconds
         "initial_spacing": 2,
-        "collision_reward": -5.0,
+        # "collision_reward": -5.0,
+        # debug: no collision penalty
+        "collision_reward": 0.0,
         "right_lane_reward": 0.01,
         "high_speed_reward": 0.7,
         "lane_change_reward": 0.0,
