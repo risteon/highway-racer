@@ -49,13 +49,17 @@ class ZeroActionAgent(AgentInterface):
 class LearnedPolicyAgent(AgentInterface):
     """Wrapper for learned policies (SAC/DistributionalSAC agents)."""
 
-    def __init__(self, policy_agent):
+    def __init__(self, policy_agent, eval_mode: bool = False):
         """Initialize with a trained policy agent."""
         self.policy_agent = policy_agent
+        self.eval_mode = eval_mode
 
     def get_action(self, obs):
         """Sample action from learned policy."""
-        action, self.policy_agent = self.policy_agent.sample_actions(obs)
+        if not self.eval_mode:
+            action, self.policy_agent = self.policy_agent.sample_actions(obs)
+        else:
+            action = self.policy_agent.eval_actions(obs)
         return action
 
     def reset(self, obs):
@@ -117,7 +121,11 @@ def run_highway_trajectory(
 
     # Initialize reward components for first frame
     last_env_reward = 0.0
-    last_reward_components = {"speed_reward": 0.0, "collision_reward": 0.0, "safety_reward": 0.0}
+    last_reward_components = {
+        "speed_reward": 0.0,
+        "collision_reward": 0.0,
+        "safety_reward": 0.0,
+    }
     last_info = {}
 
     for step in range(max_steps):
@@ -151,10 +159,18 @@ def run_highway_trajectory(
                     start_y = 10
 
                     # Get reward components from last step (or defaults for first step)
-                    speed_reward = last_info.get("rewards", {}).get("high_speed_reward", 0.0)
-                    right_reward = last_info.get("rewards", {}).get("right_lane_reward", 0.0)
-                    collision_reward = last_info.get("rewards", {}).get("collision_reward", 0.0)
-                    last_safety_reward = last_reward_components.get("safety_reward", 0.0)
+                    speed_reward = last_info.get("rewards", {}).get(
+                        "high_speed_reward", 0.0
+                    )
+                    right_reward = last_info.get("rewards", {}).get(
+                        "right_lane_reward", 0.0
+                    )
+                    collision_reward = last_info.get("rewards", {}).get(
+                        "collision_reward", 0.0
+                    )
+                    last_safety_reward = last_reward_components.get(
+                        "safety_reward", 0.0
+                    )
 
                     # Define all info items to display
                     info_items = [
@@ -209,7 +225,7 @@ def run_highway_trajectory(
             next_obs=next_obs,
         )
         safety_reward = reward_components["safety_reward"]
-        
+
         # Store reward components for next frame's overlay
         last_reward_components = reward_components
 

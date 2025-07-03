@@ -162,21 +162,21 @@ def run_highway_trajectory_wrapper(
     max_steps=1000,
     render_video=False,
     safety_bonus_coeff=0.01,
-    video_output_dir="./evaluation_videos"
+    video_output_dir="./evaluation_videos",
 ):
     """
     Wrapper for the shared run_highway_trajectory function to maintain backward compatibility.
-    
+
     This function wraps the learned policy agent and calls the shared trajectory analysis.
     """
     # Wrap the learned policy in the AgentInterface
-    agent_wrapper = LearnedPolicyAgent(agent)
-    
+    agent_wrapper = LearnedPolicyAgent(agent, eval_mode=True)
+
     # Set video output path if rendering
     video_path = None
     if render_video:
         video_path = f"{video_output_dir}/highway_trajectory_episode.mp4"
-    
+
     # Use the shared trajectory analysis function
     trajectory_metrics, images = run_highway_trajectory(
         agent=agent_wrapper,
@@ -186,9 +186,9 @@ def run_highway_trajectory_wrapper(
         render_video=render_video,
         safety_bonus_coeff=safety_bonus_coeff,
         video_output_path=video_path,
-        analysis_mode="evaluation"
+        analysis_mode="evaluation",
     )
-    
+
     return images, trajectory_metrics
 
 
@@ -266,7 +266,9 @@ def main(_):
     model_cls = kwargs.pop("model_cls")
     kwargs.pop("group_name", None)  # Remove group_name before passing to agent
     kwargs.pop("safety_penalty", None)  # Remove safety_penalty if present
-    kwargs.pop("max_offroad_steps", None)  # Remove max_offroad_steps before passing to agent
+    kwargs.pop(
+        "max_offroad_steps", None
+    )  # Remove max_offroad_steps before passing to agent
 
     # Default highway environment configuration for initial env creation
     temp_highway_config = {
@@ -287,11 +289,11 @@ def main(_):
         "policy_frequency": 5,
         "offroad_terminal": False,
     }
-    
+
     # Temporarily create environment to get observation/action spaces for agent creation
     temp_env = gym.make(FLAGS.env_name, config=temp_highway_config, render_mode=None)
     temp_env = FlattenObservation(temp_env)
-    
+
     agent = globals()[model_cls].create(
         FLAGS.seed, temp_env.observation_space, temp_env.action_space, **kwargs
     )
@@ -300,7 +302,9 @@ def main(_):
     # Load trained policy and get checkpoint config
     policy_path = os.path.abspath(FLAGS.policy_file)
     print(f"Loading policy from: {policy_path}")
-    agent, checkpoint_config, checkpoint_highway_config = load_highway_agent(agent, policy_path)
+    agent, checkpoint_config, checkpoint_highway_config = load_highway_agent(
+        agent, policy_path
+    )
 
     # Default highway environment configuration
     highway_config = {
@@ -342,18 +346,18 @@ def main(_):
             print(f"Using {key} from checkpoint highway config: {value}")
     else:
         print("No highway environment config in checkpoint, using defaults")
-        
+
         # Fallback: check algorithm config for environment settings (legacy)
         if checkpoint_config is not None:
             env_overrides = {
                 "reward_speed_range": checkpoint_config.get("reward_speed_range"),
                 "collision_reward": checkpoint_config.get("collision_reward"),
-                "right_lane_reward": checkpoint_config.get("right_lane_reward"), 
+                "right_lane_reward": checkpoint_config.get("right_lane_reward"),
                 "high_speed_reward": checkpoint_config.get("high_speed_reward"),
                 "lane_change_reward": checkpoint_config.get("lane_change_reward"),
                 "normalize_reward": checkpoint_config.get("normalize_reward"),
             }
-            
+
             for key, value in env_overrides.items():
                 if value is not None:
                     highway_config[key] = value
