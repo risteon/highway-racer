@@ -20,6 +20,7 @@ def get_config():
     config.num_qs = 2
 
     config.tau = 0.005
+    # config.tau = 0.02
     config.init_temperature = 1.0
     config.target_entropy = config_dict.placeholder(float)
     # config.target_entropy = -2.0
