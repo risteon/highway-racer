@@ -244,9 +244,9 @@ class SACLearner(Agent):
             )  # training=True
             q = qs.mean(axis=0)
 
-            # use a lower bound for the temperature
             temp = self.temp.apply_fn({"params": self.temp.params})
-            temp = jnp.maximum(temp, 0.2)
+            # use a lower bound for the temperature
+            # temp = jnp.maximum(temp, 0.2)
 
             actor_loss = (log_probs * temp - q).mean()
             return actor_loss, {
