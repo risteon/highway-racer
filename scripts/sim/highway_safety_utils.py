@@ -49,7 +49,7 @@ def _calculate_collision_risk(obs):
         collision_risk: Negative penalty for collision risk (0.0 to -1.0)
     """
     # Reshape flattened observation back to (15, 6)
-    obs = obs.reshape(15, 6)  # [presence, x, y, vx, vy, heading]
+    obs = obs.reshape(-1, 6)  # [presence, x, y, vx, vy, heading]
 
     # Filter for present vehicles (presence > 0.5)
     present_mask = obs[:, 0] > 0.5

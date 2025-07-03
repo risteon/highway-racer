@@ -68,7 +68,7 @@ flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
     "start_training", int(2e3), "Number of training steps to start training."
 )
-flags.DEFINE_integer("replay_buffer_size", 2500, "Capacity of the replay buffer.")
+flags.DEFINE_integer("replay_buffer_size", 10000, "Capacity of the replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("save_video", False, "Save videos during evaluation.")
 flags.DEFINE_boolean("record_video", False, "Record videos during training.")
@@ -192,7 +192,7 @@ def main(_):
     highway_config = {
         "observation": {
             "type": "Kinematics",
-            "vehicles_count": 15,
+            "vehicles_count": 2,
             "features": ["presence", "x", "y", "vx", "vy", "heading"],
             "normalize": False,
         },
@@ -200,14 +200,14 @@ def main(_):
         "lanes_count": 4,
         # "vehicles_count": 50,
         # debug: no other vehicles
-        "vehicles_count": 10,
+        "vehicles_count": 1,
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -5.0,
         # debug: no collision penalty
         # "collision_reward": 0.0,
-        "right_lane_reward": 0.01,
-        "high_speed_reward": 0.7,
+        "right_lane_reward": 0.00,
+        "high_speed_reward": 1.0,
         "lane_change_reward": 0.0,
         "reward_speed_range": [10, 40],
         "simulation_frequency": 15,
@@ -329,6 +329,8 @@ def main(_):
             # Random action for initial exploration
             action = env.action_space.sample()
         else:
+            # Try LESS steering
+            # action = action * np.asarray([1.0, 0.05], np.float32)  # Reduce steering
             action = np.clip(action, env.action_space.low, env.action_space.high)
 
         # DEBUG: Go right
@@ -375,7 +377,7 @@ def main(_):
         #     offroad_step_counter = 0  # Reset counter when back on road
 
         # Update EMAs for logging
-        obs_reshaped = next_observation.reshape(15, 6)  # Reshape flattened obs
+        obs_reshaped = next_observation.reshape(-1, 6)  # Reshape flattened obs
         present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
         if len(present_vehicles) > 0:
             ego_vehicle = present_vehicles[0]  # First present vehicle is ego
