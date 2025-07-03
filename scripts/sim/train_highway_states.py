@@ -98,6 +98,7 @@ flags.DEFINE_float(
 flags.DEFINE_float("action_penalty_end", 0.0, "End value for ramping up action")
 flags.DEFINE_boolean("reset_ensemble", False, "Reset one ensemble member at a time")
 flags.DEFINE_string("group_name_suffix", None, "Group name suffix")
+flags.DEFINE_boolean("use_simple_agent", False, "Use simple hand-coded agent instead of RL agent")
 config_flags.DEFINE_config_file(
     "config",
     "configs/highway_distributional_config.py",
@@ -112,6 +113,80 @@ from highway_safety_utils import (
     is_vehicle_offroad,
     calculate_training_reward,
 )
+
+
+class SimpleCollisionAvoidanceAgent:
+    """
+    Simple hand-coded agent that accelerates when safe and stops when there's a vehicle in front.
+    
+    The agent checks for vehicles directly in front (same y ± 1.5m) and applies simple logic:
+    - Accelerate if no vehicle in front within safe distance
+    - Don't accelerate if vehicle detected in front
+    - No steering (maintains lane)
+    """
+    
+    def __init__(self, target_speed=25.0, safe_distance=15.0, lateral_tolerance=1.5):
+        self.target_speed = target_speed
+        self.safe_distance = safe_distance
+        self.lateral_tolerance = lateral_tolerance
+        
+    def get_action(self, obs):
+        """
+        Get action based on simple collision avoidance logic.
+        
+        Args:
+            obs: Flattened observation (12,) = 2 vehicles × 6 features for current config
+                 or (90,) = 15 vehicles × 6 features for full config
+        
+        Returns:
+            action: [acceleration, steering] where acceleration is 0.5 if safe, 0.0 if not
+        """
+        # Determine observation shape
+        if obs.shape[0] == 12:  # 2 vehicles
+            obs_reshaped = obs.reshape(2, 6)
+        else:  # Assume 15 vehicles or other
+            obs_reshaped = obs.reshape(-1, 6)
+        
+        # Get present vehicles
+        present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
+        
+        if len(present_vehicles) <= 1:
+            # Only ego vehicle present, safe to accelerate
+            return np.array([0.5, 0.0], dtype=np.float32)
+        
+        # Get ego vehicle (first present vehicle)
+        ego_vehicle = present_vehicles[0]
+        ego_x, ego_y = ego_vehicle[1], ego_vehicle[2]
+        ego_vx = ego_vehicle[3]
+        
+        # Check for vehicles in front
+        vehicle_in_front = False
+        
+        for other_vehicle in present_vehicles[1:]:
+            other_x, other_y = other_vehicle[1], other_vehicle[2]
+            
+            # Check if vehicle is in front (greater x) and in same lateral area
+            if (other_x > ego_x and 
+                abs(other_y - ego_y) <= self.lateral_tolerance and
+                (other_x - ego_x) <= self.safe_distance):
+                vehicle_in_front = True
+                break
+        
+        # Decision logic
+        if vehicle_in_front:
+            # Vehicle detected in front within safe distance - don't accelerate
+            acceleration = 0.0
+        else:
+            # No vehicle in front - accelerate towards target speed
+            if ego_vx < self.target_speed:
+                acceleration = 0.5  # Gentle acceleration
+            else:
+                acceleration = 0.0  # Maintain speed
+        
+        # No steering (maintain lane)
+        steering = 0.0
+        
+        return np.array([acceleration, steering], dtype=np.float32)
 
 
 def run_trajectory(
@@ -239,9 +314,22 @@ def main(_):
         "max_offroad_steps", None
     )  # Remove max_offroad_steps before passing to agent
 
-    agent = globals()[model_cls].create(
-        FLAGS.seed, env.observation_space, env.action_space, **kwargs
-    )
+    # Create agent - either RL agent or simple hand-coded agent
+    if FLAGS.use_simple_agent:
+        # Use simple hand-coded collision avoidance agent
+        agent = None  # We'll handle this separately
+        simple_agent = SimpleCollisionAvoidanceAgent(
+            target_speed=25.0, 
+            safe_distance=15.0, 
+            lateral_tolerance=1.5
+        )
+        print("Using simple hand-coded collision avoidance agent")
+    else:
+        # Use normal RL agent
+        agent = globals()[model_cls].create(
+            FLAGS.seed, env.observation_space, env.action_space, **kwargs
+        )
+        simple_agent = None
 
     wandb_group_name = f"{FLAGS.config.group_name}"
 
@@ -319,19 +407,24 @@ def main(_):
     observation, info = env.reset()
 
     for i in pbar:
-        if hasattr(agent, "target_entropy") and hasattr(agent.target_entropy, "set"):
-            agent = agent.replace(target_entropy=-env.action_space.shape[-1])
-
-        output_range = (action_min, action_max)
-
-        action, agent = agent.sample_actions(observation, output_range=output_range)
-        if i < FLAGS.start_training:
-            # Random action for initial exploration
-            action = env.action_space.sample()
+        if FLAGS.use_simple_agent:
+            # Use simple hand-coded agent
+            action = simple_agent.get_action(observation)
         else:
-            # Try LESS steering
-            # action = action * np.asarray([1.0, 0.05], np.float32)  # Reduce steering
-            action = np.clip(action, env.action_space.low, env.action_space.high)
+            # Use RL agent
+            if hasattr(agent, "target_entropy") and hasattr(agent.target_entropy, "set"):
+                agent = agent.replace(target_entropy=-env.action_space.shape[-1])
+
+            output_range = (action_min, action_max)
+
+            action, agent = agent.sample_actions(observation, output_range=output_range)
+            if i < FLAGS.start_training:
+                # Random action for initial exploration
+                action = env.action_space.sample()
+            else:
+                # Try LESS steering
+                # action = action * np.asarray([1.0, 0.05], np.float32)  # Reduce steering
+                action = np.clip(action, env.action_space.low, env.action_space.high)
 
         # DEBUG: Go right
         # action = np.asarray([0.0, 0.2], np.float32)
@@ -420,7 +513,8 @@ def main(_):
                 offroad_terminations += 1
             observation, info = env.reset()
 
-        if i >= FLAGS.start_training:
+        if i >= FLAGS.start_training and not FLAGS.use_simple_agent:
+            # Only do RL training if not using simple agent
             batch = next(replay_buffer_iterator)
 
             if FLAGS.expert_replay_buffer:
@@ -465,6 +559,16 @@ def main(_):
                     },
                     step=i,
                 )
+        elif FLAGS.use_simple_agent and i % FLAGS.log_interval == 0:
+            # For simple agent, just log actions and speed (no training updates)
+            wandb.log(
+                {
+                    "training/action_acc": action[0],
+                    "training/action_steer": action[1],
+                    "training/ego_speed": ego_speed,
+                },
+                step=i,
+            )
 
             if (
                 reset_interval is not None
@@ -478,7 +582,8 @@ def main(_):
                 else:
                     agent = agent.reset(exclude=["critic", "target_critic"])
 
-        if i % FLAGS.eval_interval == 0:
+        if i % FLAGS.eval_interval == 0 and not FLAGS.use_simple_agent:
+            # Only evaluate RL agent, skip for simple agent
             evaluate(
                 agent,
                 eval_env,
@@ -487,8 +592,8 @@ def main(_):
                 safety_bonus_coeff=safety_bonus_coeff,
             )
 
-        # Save checkpoints at specified intervals
-        if i % FLAGS.save_checkpoint_interval == 0 or i == 100:
+        # Save checkpoints at specified intervals (skip for simple agent)
+        if (i % FLAGS.save_checkpoint_interval == 0 or i == 100) and not FLAGS.use_simple_agent:
             try:
                 # Handle case where wandb.run.name might be None (offline mode)
                 run_name = (
