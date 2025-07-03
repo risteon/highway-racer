@@ -11,7 +11,7 @@ def get_config():
 
     config.actor_lr = 3e-4
     config.critic_lr = 3e-4
-    config.temp_lr = 2e-4
+    config.temp_lr = 1e-4
 
     config.hidden_dims = (256, 256)
 
@@ -22,8 +22,8 @@ def get_config():
     config.tau = 0.005
     # config.tau = 0.02
     config.init_temperature = 1.0
-    config.target_entropy = config_dict.placeholder(float)
-    # config.target_entropy = -2.0
+    # config.target_entropy = config_dict.placeholder(float)
+    config.target_entropy = -2.0
     config.critic_weight_decay = 1e-3
     config.critic_layer_norm = True
 
