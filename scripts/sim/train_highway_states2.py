@@ -15,6 +15,9 @@ from gymnasium.wrappers import (
 from gymnasium.vector import AsyncVectorEnv
 import gym as old_gym  # Import old gym for spaces compatibility
 import numpy as np
+import threading
+import queue
+import time
 
 
 import tqdm
@@ -55,7 +58,7 @@ flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
     "start_training", int(2e3), "Number of training steps to start training."
 )
-flags.DEFINE_integer("replay_buffer_size", 10000, "Capacity of the replay buffer.")
+flags.DEFINE_integer("replay_buffer_size", 40000, "Capacity of the replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("save_video", False, "Save videos during evaluation.")
 flags.DEFINE_boolean("record_video", False, "Record videos during training.")
@@ -88,9 +91,181 @@ flags.DEFINE_string("group_name_suffix", None, "Group name suffix")
 flags.DEFINE_integer("num_envs", 8, "Number of parallel environments")
 config_flags.DEFINE_config_file(
     "config",
-    "configs/highway_distributional_config.py",
+    "configs/highway_sac_config.py",
     "File path to the training hyperparameter configuration.",
 )
+
+
+class AsyncEnvStepper:
+    """Handles asynchronous environment stepping with action queue."""
+
+    def __init__(
+        self, envs, replay_buffer, num_envs, action_queue_size=2, log_interval=500
+    ):
+        self.envs = envs
+        self.replay_buffer = replay_buffer
+        self.num_envs = num_envs
+        self.log_interval = log_interval
+
+        # Queues for communication between threads
+        self.action_queue = queue.Queue(maxsize=action_queue_size)
+        self.result_queue = queue.Queue(maxsize=action_queue_size)
+
+        # Thread control
+        self.stop_event = threading.Event()
+        self.env_thread = None
+
+        # Current state
+        self.current_observations = None
+        self.current_infos = None
+
+        # Statistics tracking
+        self.total_steps = 0
+        self.collision_counter = 0
+        self.speed_ema = 0.0
+        self.collision_ema = 0.0
+        self.ema_beta = 3e-4
+
+    def start(self, initial_observations, initial_infos):
+        """Start the async environment stepping thread."""
+        self.current_observations = initial_observations
+        self.current_infos = initial_infos
+        self.env_thread = threading.Thread(target=self._env_step_worker, daemon=True)
+        self.env_thread.start()
+
+    def stop(self):
+        """Stop the async environment stepping thread."""
+        self.stop_event.set()
+        if self.env_thread and self.env_thread.is_alive():
+            self.env_thread.join(timeout=5.0)
+
+    def queue_actions(self, actions, step_num):
+        """Queue actions for the next environment step."""
+        try:
+            self.action_queue.put((actions, step_num), timeout=None)
+            return True
+        except queue.Full:
+            return False  # Queue is full, skip this step
+
+    def get_results(self, timeout=None):
+        """Get results from completed environment steps."""
+        results = self.result_queue.get(timeout=timeout)
+        return results
+
+    def _env_step_worker(self):
+        """Worker thread that processes environment steps."""
+        while not self.stop_event.is_set():
+            try:
+                # Get next action from queue
+                actions, step_num = self.action_queue.get(timeout=None)
+
+                # Step environment
+                step_results = self._step_environment(actions, step_num)
+
+                # Put results in result queue
+                self.result_queue.put(step_results)
+
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Error in env step worker: {e}")
+                break
+
+    def _step_environment(self, actions, step_num):
+        """Execute a single environment step and process results."""
+        # Step the vectorized environment
+        next_observations, rewards, terminations, truncations, infos = self.envs.step(
+            actions
+        )
+
+        # Process statistics
+        collision_indicators = np.zeros(self.num_envs)
+        ego_speeds = np.zeros(self.num_envs)
+
+        for env_idx in range(self.num_envs):
+            # Check for collision from highway-env reward components
+            if "rewards" in infos and infos["rewards"] is not None:
+                if (
+                    isinstance(infos["rewards"], list)
+                    and len(infos["rewards"]) > env_idx
+                ):
+                    env_rewards = infos["rewards"][env_idx]
+                    if env_rewards is not None and "collision_reward" in env_rewards:
+                        collision_indicators[env_idx] = (
+                            1.0 if env_rewards["collision_reward"] > 0.0 else 0.0
+                        )
+
+            # Extract ego speed for logging
+            obs_reshaped = next_observations[env_idx].reshape(15, 6)
+            present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
+            if len(present_vehicles) > 0:
+                ego_vehicle = present_vehicles[0]
+                ego_speeds[env_idx] = ego_vehicle[3]  # vx of ego vehicle
+
+        # Update EMAs
+        self.speed_ema = (1 - self.ema_beta) * self.speed_ema + self.ema_beta * np.mean(
+            ego_speeds
+        )
+        self.collision_ema = (
+            1 - self.ema_beta
+        ) * self.collision_ema + self.ema_beta * np.mean(collision_indicators)
+        self.collision_counter += np.sum(collision_indicators)
+
+        # Log EMAs periodically
+        if step_num % self.log_interval == 0:
+            wandb.log(
+                {
+                    "training/speed_ema": self.speed_ema,
+                    "training/collision_ema": self.collision_ema,
+                    "training/collision_counter": self.collision_counter,
+                },
+                step=step_num,
+            )
+
+        # Handle episode terminations and create masks
+        dones = terminations | truncations
+        masks = 1.0 - dones.astype(float)
+
+        # Handle `final_observation` in case of truncation
+        real_next_observations = next_observations.copy()
+        for idx, trunc in enumerate(truncations):
+            if trunc:
+                if "final_observation" in infos and idx < len(
+                    infos["final_observation"]
+                ):
+                    if infos["final_observation"][idx] is not None:
+                        real_next_observations[idx] = infos["final_observation"][idx]
+
+        # Add experiences to replay buffer
+        for env_idx in range(self.num_envs):
+            self.replay_buffer.insert(
+                dict(
+                    observations=self.current_observations[env_idx],
+                    actions=actions[env_idx],
+                    rewards=rewards[env_idx],
+                    masks=masks[env_idx],
+                    dones=dones[env_idx],
+                    next_observations=real_next_observations[env_idx],
+                )
+            )
+
+        # Update current state for next step
+        self.current_observations = next_observations
+        self.current_infos = infos
+        self.total_steps += 1
+
+        # Log episode statistics from vectorized environment
+        if "final_info" in infos:
+            for info in infos["final_info"]:
+                if info is not None and "episode" in info:
+                    wandb_log = {
+                        f"training/return": info["episode"]["r"],
+                        f"training/length": info["episode"]["l"],
+                        f"training/time": info["episode"]["t"],
+                    }
+                    wandb.log(wandb_log, step=step_num)
+
+        return True
 
 
 def make_env(env_name, highway_config, seed, idx):
@@ -178,13 +353,13 @@ def main(_):
     highway_config = {
         "observation": {
             "type": "Kinematics",
-            "vehicles_count": 15,
+            "vehicles_count": 2,
             "features": ["presence", "x", "y", "vx", "vy", "heading"],
             "normalize": False,
         },
         "action": {"type": "ContinuousAction"},
         "lanes_count": 4,
-        "vehicles_count": 50,
+        "vehicles_count": 1,
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -5.0,
@@ -271,12 +446,6 @@ def main(_):
     action_min: np.ndarray = envs.single_action_space.low
     action_max: np.ndarray = envs.single_action_space.high
 
-    speed_ema = 0.0
-    collision_ema = 0.0
-    collision_counter = 0
-
-    ema_beta = 3e-4
-
     if FLAGS.ramp_action:
         action_max[1] = max_action_schedule(0)
 
@@ -287,101 +456,54 @@ def main(_):
         dynamic_ncols=True,
     )
 
+    # Initialize environment and async stepper
     observations, infos = envs.reset(seed=FLAGS.seed)
 
-    for i in pbar:
-        # if hasattr(agent, "target_entropy") and hasattr(agent.target_entropy, "set"):
-        #     agent = agent.replace(target_entropy=-envs.single_action_space.shape[-1])
+    # Create async environment stepper
+    async_stepper = AsyncEnvStepper(
+        envs,
+        replay_buffer,
+        FLAGS.num_envs,
+        action_queue_size=1,
+        log_interval=FLAGS.log_interval,
+    )
+    async_stepper.start(observations, infos)
 
-        output_range = (action_min, action_max)
+    # Keep track of current observations for action sampling
+    current_observations = observations
 
-        if i < FLAGS.start_training:
-            # Random actions for initial exploration
-            actions = np.array(
-                [envs.single_action_space.sample() for _ in range(FLAGS.num_envs)]
-            )
-        else:
-            # Sample actions from agent
-            actions, agent = agent.sample_actions(
-                observations, output_range=output_range
-            )
+    # first action so that env can run in the background
+    async_stepper.queue_actions(envs.action_space.sample(), 0)
 
-        if FLAGS.ramp_action == "linear":
-            action_max[1] = max_action_schedule(i)
+    try:
+        for i in pbar:
+            output_range = (action_min, action_max)
 
-        next_observations, rewards, terminations, truncations, infos = envs.step(
-            actions
-        )
-
-        # Use environment rewards as-is (no safety modification)
-        # Calculate collision indicators for logging
-        collision_indicators = np.zeros(FLAGS.num_envs)
-        ego_speeds = np.zeros(FLAGS.num_envs)
-
-        for env_idx in range(FLAGS.num_envs):
-            # Check for collision from highway-env reward components
-            if "rewards" in infos and infos["rewards"] is not None:
-                if (
-                    isinstance(infos["rewards"], list)
-                    and len(infos["rewards"]) > env_idx
-                ):
-                    env_rewards = infos["rewards"][env_idx]
-                    if env_rewards is not None and "collision_reward" in env_rewards:
-                        collision_indicators[env_idx] = (
-                            1.0 if env_rewards["collision_reward"] > 0.0 else 0.0
-                        )
-
-            # Extract ego speed for logging
-            obs_reshaped = next_observations[env_idx].reshape(15, 6)
-            present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
-            if len(present_vehicles) > 0:
-                ego_vehicle = present_vehicles[0]
-                ego_speeds[env_idx] = ego_vehicle[3]  # vx of ego vehicle
-
-        # Update EMAs for logging
-        speed_ema = (1 - ema_beta) * speed_ema + ema_beta * np.mean(ego_speeds)
-        collision_ema = (1 - ema_beta) * collision_ema + ema_beta * np.mean(
-            collision_indicators
-        )
-        collision_counter += np.sum(collision_indicators)
-
-        # Handle episode terminations and create masks
-        dones = terminations | truncations
-        masks = 1.0 - dones.astype(float)
-
-        # Handle `final_observation` in case of truncation
-        real_next_observations = next_observations.copy()
-        for idx, trunc in enumerate(truncations):
-            if trunc:
-                if "final_observation" in infos and idx < len(infos["final_observation"]):
-                    if infos["final_observation"][idx] is not None:
-                        real_next_observations[idx] = infos["final_observation"][idx]
-
-        # Add experiences to replay buffer
-        for env_idx in range(FLAGS.num_envs):
-            replay_buffer.insert(
-                dict(
-                    observations=observations[env_idx],
-                    actions=actions[env_idx],
-                    rewards=rewards[env_idx],
-                    masks=masks[env_idx],
-                    dones=dones[env_idx],
-                    next_observations=real_next_observations[env_idx],
+            if i < FLAGS.start_training:
+                # Random actions for initial exploration
+                # actions = np.array(
+                #     [envs.single_action_space.sample() for _ in range(FLAGS.num_envs)]
+                # )
+                actions = envs.action_space.sample()
+            else:
+                # Sample actions from agent using current observations
+                actions, agent = agent.sample_actions(
+                    current_observations, output_range=output_range
                 )
-            )
 
-        observations = next_observations
+            if FLAGS.ramp_action == "linear":
+                action_max[1] = max_action_schedule(i)
 
-        # Log episode statistics from vectorized environment
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info is not None and "episode" in info:
-                    wandb_log = {
-                        f"training/return": info["episode"]["r"],
-                        f"training/length": info["episode"]["l"],
-                        f"training/time": info["episode"]["t"],
-                    }
-                    wandb.log(wandb_log, step=i)
+            # Queue actions for async environment stepping
+            if async_stepper.queue_actions(actions, i):
+                # Actions queued successfully
+                pass
+            else:
+                # Queue full, skip this step or handle differently
+                print(f"Warning: Action queue full at step {i}")
+
+            # Just waiting on a true result to sync
+            _ = async_stepper.get_results(timeout=None)
 
         if i >= FLAGS.start_training:
             batch = next(replay_buffer_iterator)
@@ -420,7 +542,6 @@ def main(_):
                     {
                         "training/action_acc": np.mean(actions[:, 0]),
                         "training/action_steer": np.mean(actions[:, 1]),
-                        "training/ego_speed": np.mean(ego_speeds),
                     },
                     step=i,
                 )
@@ -524,20 +645,34 @@ def main(_):
                 print(f"Cannot save checkpoints: {e}")
 
         pbar.set_description(
-            f"Step {i}, Mean Reward: {np.mean(rewards):.2f}, Speed EMA: {speed_ema:.2f}, Collision EMA: {collision_ema:.3f}"
+            f"Step {i}, Speed EMA: {async_stepper.speed_ema:.2f}, Collision EMA: {async_stepper.collision_ema:.3f}, Queue Size: {async_stepper.action_queue.qsize()}"
         )
 
         if FLAGS.save_buffer and i % FLAGS.save_buffer_interval == 0:
             with open(os.path.join(FLAGS.save_dir, f"buffer_{i}.pkl"), "wb") as f:
                 pickle.dump(replay_buffer, f)
 
-        wandb_log = {}
-        if i % FLAGS.log_interval == 0:
-            wandb_log["speed_ema"] = speed_ema
-            wandb_log["collision_ema"] = collision_ema
-            wandb_log["collision_counter"] = collision_counter
-            if wandb_log:
-                wandb.log(wandb_log, step=i)
+            if i % FLAGS.log_interval == 0:
+                wandb.log(
+                    {
+                        "training/action_queue_size": async_stepper.action_queue.qsize(),
+                        "training/result_queue_size": async_stepper.result_queue.qsize(),
+                    },
+                    step=i,
+                )
+
+    finally:
+        # Stop async stepper and clean up
+        print("Stopping async environment stepper...")
+        async_stepper.stop()
+
+        # Process any remaining results
+        try:
+            while True:
+                remaining_result = async_stepper.get_results(timeout=0.1)
+                print("Processed remaining environment result")
+        except:
+            print("Finished processing remaining environment results")
 
     if FLAGS.save_buffer:
         with open(os.path.join(FLAGS.save_dir, "final_buffer.pkl"), "wb") as f:
