@@ -95,12 +95,14 @@ config_flags.DEFINE_config_file(
 
 def make_env(env_name, highway_config, seed, idx):
     """Create a single environment for vectorization."""
+
     def thunk():
         env = gym.make(env_name, config=highway_config, render_mode=None)
         env = RecordEpisodeStatistics(env)
         env = FlattenObservation(env)  # Flatten (15, 6) -> (90,)
         env.action_space.seed(seed + idx)
         return env
+
     return thunk
 
 
@@ -197,10 +199,12 @@ def main(_):
     }
 
     # Create vectorized environments
-    envs = AsyncVectorEnv([
-        make_env(FLAGS.env_name, highway_config, FLAGS.seed, i) 
-        for i in range(FLAGS.num_envs)
-    ])
+    envs = AsyncVectorEnv(
+        [
+            make_env(FLAGS.env_name, highway_config, FLAGS.seed, i)
+            for i in range(FLAGS.num_envs)
+        ]
+    )
 
     # Create single evaluation environment
     eval_env = gym.make(FLAGS.env_name, config=highway_config, render_mode="rgb_array")
@@ -286,36 +290,47 @@ def main(_):
     observations, infos = envs.reset(seed=FLAGS.seed)
 
     for i in pbar:
-        if hasattr(agent, "target_entropy") and hasattr(agent.target_entropy, "set"):
-            agent = agent.replace(target_entropy=-envs.single_action_space.shape[-1])
+        # if hasattr(agent, "target_entropy") and hasattr(agent.target_entropy, "set"):
+        #     agent = agent.replace(target_entropy=-envs.single_action_space.shape[-1])
 
         output_range = (action_min, action_max)
 
         if i < FLAGS.start_training:
             # Random actions for initial exploration
-            actions = np.array([envs.single_action_space.sample() for _ in range(FLAGS.num_envs)])
+            actions = np.array(
+                [envs.single_action_space.sample() for _ in range(FLAGS.num_envs)]
+            )
         else:
             # Sample actions from agent
-            actions, agent = agent.sample_actions(observations, output_range=output_range)
+            actions, agent = agent.sample_actions(
+                observations, output_range=output_range
+            )
 
         if FLAGS.ramp_action == "linear":
             action_max[1] = max_action_schedule(i)
 
-        next_observations, rewards, terminations, truncations, infos = envs.step(actions)
+        next_observations, rewards, terminations, truncations, infos = envs.step(
+            actions
+        )
 
         # Use environment rewards as-is (no safety modification)
         # Calculate collision indicators for logging
         collision_indicators = np.zeros(FLAGS.num_envs)
         ego_speeds = np.zeros(FLAGS.num_envs)
-        
+
         for env_idx in range(FLAGS.num_envs):
             # Check for collision from highway-env reward components
             if "rewards" in infos and infos["rewards"] is not None:
-                if isinstance(infos["rewards"], list) and len(infos["rewards"]) > env_idx:
+                if (
+                    isinstance(infos["rewards"], list)
+                    and len(infos["rewards"]) > env_idx
+                ):
                     env_rewards = infos["rewards"][env_idx]
                     if env_rewards is not None and "collision_reward" in env_rewards:
-                        collision_indicators[env_idx] = 1.0 if env_rewards["collision_reward"] > 0.0 else 0.0
-            
+                        collision_indicators[env_idx] = (
+                            1.0 if env_rewards["collision_reward"] > 0.0 else 0.0
+                        )
+
             # Extract ego speed for logging
             obs_reshaped = next_observations[env_idx].reshape(15, 6)
             present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
@@ -325,12 +340,22 @@ def main(_):
 
         # Update EMAs for logging
         speed_ema = (1 - ema_beta) * speed_ema + ema_beta * np.mean(ego_speeds)
-        collision_ema = (1 - ema_beta) * collision_ema + ema_beta * np.mean(collision_indicators)
+        collision_ema = (1 - ema_beta) * collision_ema + ema_beta * np.mean(
+            collision_indicators
+        )
         collision_counter += np.sum(collision_indicators)
 
         # Handle episode terminations and create masks
         dones = terminations | truncations
         masks = 1.0 - dones.astype(float)
+
+        # Handle `final_observation` in case of truncation
+        real_next_observations = next_observations.copy()
+        for idx, trunc in enumerate(truncations):
+            if trunc:
+                if "final_observation" in infos and idx < len(infos["final_observation"]):
+                    if infos["final_observation"][idx] is not None:
+                        real_next_observations[idx] = infos["final_observation"][idx]
 
         # Add experiences to replay buffer
         for env_idx in range(FLAGS.num_envs):
@@ -341,7 +366,7 @@ def main(_):
                     rewards=rewards[env_idx],
                     masks=masks[env_idx],
                     dones=dones[env_idx],
-                    next_observations=next_observations[env_idx],
+                    next_observations=real_next_observations[env_idx],
                 )
             )
 
@@ -352,9 +377,9 @@ def main(_):
             for info in infos["final_info"]:
                 if info is not None and "episode" in info:
                     wandb_log = {
-                        f"training/return": info["episode"]["r"], 
-                        f"training/length": info["episode"]["l"], 
-                        f"training/time": info["episode"]["t"]
+                        f"training/return": info["episode"]["r"],
+                        f"training/length": info["episode"]["l"],
+                        f"training/time": info["episode"]["t"],
                     }
                     wandb.log(wandb_log, step=i)
 
