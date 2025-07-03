@@ -66,9 +66,9 @@ flags.DEFINE_integer("eval_interval", 20000, "Eval interval.")
 flags.DEFINE_integer("batch_size", 128, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
-    "start_training", int(2e3), "Number of training steps to start training."
+    "start_training", int(1e3), "Number of training steps to start training."
 )
-flags.DEFINE_integer("replay_buffer_size", 10000, "Capacity of the replay buffer.")
+flags.DEFINE_integer("replay_buffer_size", 25000, "Capacity of the replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("save_video", False, "Save videos during evaluation.")
 flags.DEFINE_boolean("record_video", False, "Record videos during training.")
@@ -198,12 +198,14 @@ def main(_):
         },
         "action": {"type": "ContinuousAction"},
         "lanes_count": 4,
-        "vehicles_count": 50,
+        # "vehicles_count": 50,
+        # debug: no other vehicles
+        "vehicles_count": 0,
         "duration": 40,  # seconds
         "initial_spacing": 2,
-        "collision_reward": -5.0,
+        # "collision_reward": -5.0,
         # debug: no collision penalty
-        # "collision_reward": 0.0,
+        "collision_reward": 0.0,
         "right_lane_reward": 0.01,
         "high_speed_reward": 0.7,
         "lane_change_reward": 0.0,
@@ -331,6 +333,10 @@ def main(_):
 
         # DEBUG: Go right
         # action = np.asarray([0.0, 0.2], np.float32)
+        # DEBUG: only go straight
+        action[1] = 0.0
+        # DEBUG: speed up and keep going fast
+        action[0] = 1.0
 
         if FLAGS.ramp_action == "linear":
             action_max[1] = max_action_schedule(i)
