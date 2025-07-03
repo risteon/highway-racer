@@ -113,13 +113,13 @@ flags.DEFINE_string("group_name_suffix", None, "Group name suffix")
 
 # New distributed training flags
 flags.DEFINE_integer("num_workers", 4, "Number of environment workers")
-flags.DEFINE_integer("worker_steps_per_iteration", 64, "Steps per worker iteration")
-flags.DEFINE_float("policy_update_frequency", 0.5, "Policy broadcast frequency (Hz)")
-flags.DEFINE_integer("experience_batch_size", 256, "Experiences per worker transfer")
+flags.DEFINE_integer("worker_steps_per_iteration", 32, "Steps per worker iteration")
+flags.DEFINE_float("policy_update_frequency", 1.0, "Policy broadcast frequency (Hz)")
+flags.DEFINE_integer("experience_batch_size", 128, "Experiences per worker transfer")
 flags.DEFINE_integer(
-    "learner_update_ratio", 4, "Updates per experience collection cycle"
+    "learner_update_ratio", 8, "Continuous updates (higher = more training per experience)"
 )
-flags.DEFINE_integer("max_queue_size", 4, "Maximum experience queue size")
+flags.DEFINE_integer("max_queue_size", 100, "Maximum experience queue size")
 flags.DEFINE_boolean(
     "debug_distributed", False, "Enable distributed training debug logging"
 )
@@ -179,9 +179,12 @@ class DistributedReplayBuffer:
         with self.lock:
             self.buffer.seed(seed)
 
-    def get_iterator(self, sample_args: Dict[str, Any]):
+    def get_iterator(self, queue_size: int = 2, sample_args: Dict[str, Any] = None):
         """Get iterator for sampling."""
-        return self.buffer.get_iterator(sample_args)
+        with self.lock:
+            if sample_args is None:
+                sample_args = {}
+            return self.buffer.get_iterator(queue_size=queue_size, sample_args=sample_args)
 
 
 def create_highway_env(
@@ -462,6 +465,7 @@ class DistributedLearner:
         self.total_updates = 0
         self.experiences_collected = 0
         self.last_policy_broadcast = time.time()
+        self.last_log_time = time.time()
 
         # Policy apply functions for workers
         self.apply_fns = {
@@ -469,20 +473,23 @@ class DistributedLearner:
         }
         if hasattr(self.agent, "limits"):
             self.apply_fns["limits"] = self.agent.limits.apply_fn
+            
+        # Asynchronous control
+        self.stop_collection = threading.Event()
+        self.collection_thread = None
+        self.replay_buffer_iterator = None
 
-    def collect_worker_experiences(self) -> int:
-        """Collect experiences from all workers."""
-        experiences_collected = 0
-
-        # Collect all available experiences (non-blocking)
-        for _ in range(4):
+    def _background_experience_collection(self) -> None:
+        """Background thread for continuous experience collection."""
+        while not self.stop_collection.is_set():
             try:
-                worker_data = self.experience_queue.get_nowait()
+                # Block for a short time to get experiences
+                worker_data = self.experience_queue.get(timeout=0.1)
                 experiences = worker_data["experiences"]
 
                 # Insert experiences into replay buffer
                 self.replay_buffer.insert_batch(experiences)
-                experiences_collected += len(experiences)
+                self.experiences_collected += len(experiences)
 
                 if FLAGS.debug_distributed:
                     worker_stats = worker_data["worker_stats"]
@@ -491,25 +498,58 @@ class DistributedLearner:
                     )
 
             except queue.Empty:
-                break
-
-        self.experiences_collected += experiences_collected
-        return experiences_collected
+                continue
+            except Exception as e:
+                if FLAGS.debug_distributed:
+                    print(f"Error in background collection: {e}")
+                continue
+                
+    def start_experience_collection(self) -> None:
+        """Start background experience collection thread."""
+        if self.collection_thread is None:
+            self.collection_thread = threading.Thread(
+                target=self._background_experience_collection,
+                daemon=True
+            )
+            self.collection_thread.start()
+            print("Started background experience collection thread")
+            
+    def stop_experience_collection(self) -> None:
+        """Stop background experience collection thread."""
+        self.stop_collection.set()
+        if self.collection_thread is not None:
+            self.collection_thread.join(timeout=2.0)
+            print("Stopped background experience collection thread")
 
     def update_agent(self) -> Tuple[Any, Dict[str, float]]:
-        """Perform agent updates."""
-        # Sample from replay buffer
-        batch_size = FLAGS.batch_size * FLAGS.utd_ratio
-        batch = self.replay_buffer.sample_batch(batch_size)
+        """Perform agent updates using iterator for continuous sampling."""
+        # Initialize iterator if not done yet
+        if self.replay_buffer_iterator is None:
+            if self.replay_buffer.size < FLAGS.batch_size * FLAGS.utd_ratio:
+                return self.agent, {}
+            
+            # Create JAX-optimized iterator
+            sample_args = {
+                "batch_size": FLAGS.batch_size * FLAGS.utd_ratio,
+            }
+            self.replay_buffer_iterator = self.replay_buffer.get_iterator(
+                queue_size=2, sample_args=sample_args
+            )
+            print("Initialized replay buffer iterator for continuous sampling")
 
-        if batch is None:
+        try:
+            # Get batch from iterator (this is JAX-optimized and fast)
+            batch = next(self.replay_buffer_iterator)
+        except (StopIteration, RuntimeError):
+            # Buffer may be empty or iterator exhausted, skip this update
             return self.agent, {}
 
         # Create output range
         action_min = np.array([-1.0, -1.0])  # Default action space
         action_max = np.array([1.0, 1.0])
         output_range = (action_min, action_max)
-
+        
+        batch_size = FLAGS.batch_size * FLAGS.utd_ratio
         mini_batch_output_range = (
             jnp.tile(output_range[0], (batch_size, 1)),
             jnp.tile(output_range[1], (batch_size, 1)),
@@ -556,59 +596,170 @@ class DistributedLearner:
         time_since_last = time.time() - self.last_policy_broadcast
         return time_since_last >= (1.0 / FLAGS.policy_update_frequency)
 
-    def learning_loop(self, max_steps: int, start_training: int) -> None:
-        """Main learning loop with continuous updates."""
-        print("Starting distributed learning loop")
-
-        step_count = 0
-
+    def learning_loop(self, max_updates: int, start_training: int) -> None:
+        """Asynchronous learning loop with continuous updates."""
+        print("Starting asynchronous distributed learning loop")
+        print(f"Target updates: {max_updates}, Start training at: {start_training} buffer size")
+        
+        # Start background experience collection
+        self.start_experience_collection()
+        
+        # Wait for initial experiences
+        print("Waiting for initial experiences...")
+        while self.replay_buffer.size < start_training:
+            time.sleep(0.1)
+            if self.replay_buffer.size > 0 and self.replay_buffer.size % 1000 == 0:
+                print(f"Buffer size: {self.replay_buffer.size}/{start_training}")
+        
+        print(f"Starting training with {self.replay_buffer.size} experiences")
+        
+        # Progress tracking
+        start_time = time.time()
+        last_update_count = 0
+        
         pbar = tqdm.tqdm(
-            total=max_steps,
-            smoothing=0.1,
+            total=max_updates,
+            smoothing=0.1, 
             disable=not FLAGS.tqdm,
             dynamic_ncols=True,
+            desc="Training Updates"
         )
-
-        while step_count < max_steps:
-            # Collect experiences from workers
-            new_experiences = self.collect_worker_experiences()
-
-            if new_experiences > 1:
-                # step_count += new_experiences
-                step_count += 1
-                pbar.update(1)
-
-            # Perform agent updates if enough data available
-            if self.replay_buffer.size >= start_training:
-                for _ in range(FLAGS.learner_update_ratio):
-                    if self.replay_buffer.size >= FLAGS.batch_size * FLAGS.utd_ratio:
-                        self.agent, update_info = self.update_agent()
-
-                        # Log training metrics
-                        if self.total_updates % FLAGS.log_interval == 0:
-                            wandb.log(
-                                {f"training/{k}": v for k, v in update_info.items()},
-                                step=step_count,
-                            )
-
-                            wandb.log(
-                                {
-                                    "distributed/experiences_collected": self.experiences_collected,
-                                    "distributed/total_updates": self.total_updates,
-                                    "distributed/replay_buffer_size": self.replay_buffer.size,
-                                    "distributed/step_count": step_count,
-                                },
-                                step=step_count,
-                            )
-
-                # Broadcast policy updates if needed
+        
+        try:
+            # Continuous training loop
+            while self.total_updates < max_updates:
+                # Perform agent update
+                self.agent, update_info = self.update_agent()
+                
+                # Update progress bar
+                updates_since_last = self.total_updates - last_update_count
+                if updates_since_last > 0:
+                    pbar.update(updates_since_last)
+                    last_update_count = self.total_updates
+                    
+                # Save checkpoints periodically
+                if self.total_updates > 0 and self.total_updates % FLAGS.save_checkpoint_interval == 0:
+                    effective_steps = self.experiences_collected
+                    self.save_checkpoint(effective_steps)
+                
+                # Log training metrics periodically
+                if self.total_updates > 0 and self.total_updates % FLAGS.log_interval == 0:
+                    elapsed_time = time.time() - self.last_log_time
+                    updates_per_sec = FLAGS.log_interval / elapsed_time if elapsed_time > 0 else 0
+                    
+                    # Calculate effective step count based on experiences collected
+                    effective_steps = self.experiences_collected
+                    
+                    wandb.log(
+                        {f"training/{k}": v for k, v in update_info.items()},
+                        step=effective_steps,
+                    )
+                    
+                    wandb.log(
+                        {
+                            "distributed/experiences_collected": self.experiences_collected,
+                            "distributed/total_updates": self.total_updates,
+                            "distributed/replay_buffer_size": self.replay_buffer.size,
+                            "distributed/updates_per_sec": updates_per_sec,
+                            "distributed/effective_steps": effective_steps,
+                        },
+                        step=effective_steps,
+                    )
+                    
+                    # Update progress bar description
+                    pbar.set_description(
+                        f"Training Updates (Buffer: {self.replay_buffer.size}, "
+                        f"Exp: {self.experiences_collected}, "
+                        f"UPS: {updates_per_sec:.1f})"
+                    )
+                    
+                    self.last_log_time = time.time()
+                
+                # Broadcast policy updates periodically  
                 if self.should_broadcast_policy():
                     self.broadcast_policy_parameters()
+                    
+                # Small sleep to prevent excessive CPU usage
+                time.sleep(0.001)
+                
+        except Exception as e:
+            print(f"Error in learning loop: {e}")
+            raise
+        finally:
+            # Stop background collection
+            self.stop_experience_collection()
+            pbar.close()
+            
+        elapsed_total = time.time() - start_time
+        print(f"Distributed learning completed: {self.total_updates} updates in {elapsed_total:.1f}s")
+        print(f"Final stats: {self.experiences_collected} experiences, buffer size: {self.replay_buffer.size}")
+        
+    def save_checkpoint(self, step: int) -> None:
+        """Save training checkpoint."""
+        try:
+            # Handle case where wandb.run.name might be None (offline mode)
+            run_name = (
+                wandb.run.name
+                if wandb.run.name is not None
+                else f"highway_distributed_run_{FLAGS.seed}"
+            )
+            policy_folder = os.path.abspath(
+                os.path.join(FLAGS.checkpoint_dir, run_name)
+            )
+            os.makedirs(policy_folder, exist_ok=True)
 
-            # Small sleep to prevent busy waiting
-            # time.sleep(0.001)
+            # Convert config to regular dict to avoid serialization issues
+            config_dict = dict(FLAGS.config)
 
-        print("Distributed learning loop completed")
+            # Convert flags to regular dict
+            flags_dict = {}
+            for key, value in FLAGS.flag_values_dict().items():
+                if key != "config":  # Skip config to avoid circular reference
+                    try:
+                        if hasattr(value, "to_dict"):
+                            flags_dict[key] = value.to_dict()
+                        elif isinstance(value, (str, int, float, bool)) or value is None:
+                            flags_dict[key] = value
+                        else:
+                            flags_dict[key] = str(value)
+                    except Exception as e:
+                        print(f"Warning: Could not serialize flag {key}: {e}")
+                        flags_dict[key] = str(value)
+
+            param_dict = {
+                "actor": self.agent.actor,
+                "critic": self.agent.critic,
+                "target_critic_params": self.agent.target_critic,
+                "temp": self.agent.temp,
+                "rng": self.agent.rng,
+                "config": config_dict,
+                "training_flags": flags_dict,
+            }
+
+            if hasattr(self.agent, "limits"):
+                param_dict["limits"] = self.agent.limits
+            if hasattr(self.agent, "q_entropy_lagrange"):
+                param_dict["q_entropy_lagrange"] = self.agent.q_entropy_lagrange
+
+            # Save main model checkpoint
+            checkpoints.save_checkpoint(
+                policy_folder, param_dict, step=step, keep=FLAGS.keep_checkpoints
+            )
+
+            # Save config separately using pickle
+            import pickle
+            config_file = os.path.join(policy_folder, f"config_{step}.pkl")
+            with open(config_file, "wb") as f:
+                pickle.dump(
+                    {
+                        "config": config_dict,
+                        "training_flags": flags_dict,
+                    },
+                    f,
+                )
+            print(f"Saved checkpoint at update {step} to {policy_folder}")
+        except Exception as e:
+            print(f"Cannot save checkpoint: {e}")
 
 
 def run_trajectory(
@@ -808,8 +959,9 @@ def main(_):
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        # Run distributed learning
-        learner.learning_loop(FLAGS.max_steps, FLAGS.start_training)
+        # Run distributed learning (using max_steps as target updates)
+        target_updates = FLAGS.max_steps // FLAGS.learner_update_ratio  # Convert steps to updates
+        learner.learning_loop(target_updates, FLAGS.start_training)
 
     except KeyboardInterrupt:
         print("\nReceived interrupt signal")
