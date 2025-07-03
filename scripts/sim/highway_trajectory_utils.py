@@ -142,7 +142,7 @@ def run_highway_trajectory(
                 draw = ImageDraw.Draw(img_pil)
 
                 # Extract ego vehicle info for overlay
-                obs_reshaped = obs.reshape(15, 6)
+                obs_reshaped = obs.reshape(-1, 6)
                 present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
                 if len(present_vehicles) > 0:
                     ego_vehicle = present_vehicles[0]
@@ -230,7 +230,7 @@ def run_highway_trajectory(
         last_reward_components = reward_components
 
         # Extract vehicle information from observation for analysis
-        obs_reshaped = obs.reshape(15, 6)
+        obs_reshaped = obs.reshape(-1, 6)
         present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
 
         if len(present_vehicles) > 0:
