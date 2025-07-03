@@ -306,6 +306,23 @@ def main(_):
         agent, policy_path
     )
 
+    # Auto-generate output folder based on run name and checkpoint name
+    checkpoint_name = os.path.basename(FLAGS.policy_file)
+    if not checkpoint_name:
+        checkpoint_name = "unknown_checkpoint"
+    
+    # Extract run name from policy path (parent directory of checkpoint)
+    run_name = os.path.basename(os.path.dirname(FLAGS.policy_file))
+    if not run_name:
+        run_name = "unknown_run"
+    
+    # Create evaluation folder under ./evaluation/<run-name>/<checkpoint-name>/
+    auto_output_dir = os.path.join("evaluation", run_name, checkpoint_name)
+    
+    # Use auto-generated path instead of command line flag
+    actual_output_dir = auto_output_dir
+    print(f"Auto-generated output directory: {actual_output_dir}")
+
     # Default highway environment configuration
     highway_config = {
         "observation": {
@@ -370,7 +387,7 @@ def main(_):
     env = TimeLimit(env, max_episode_steps=FLAGS.max_steps)
 
     # Create output directory
-    Path(FLAGS.video_output_dir).mkdir(parents=True, exist_ok=True)
+    Path(actual_output_dir).mkdir(parents=True, exist_ok=True)
 
     # Run evaluation
     episode_metrics, summary_stats, videos = evaluate_highway_policy(
@@ -381,7 +398,7 @@ def main(_):
         render_video=FLAGS.render,
         max_steps=FLAGS.max_steps,
         safety_bonus_coeff=safety_bonus_coeff,
-        video_output_dir=FLAGS.video_output_dir,
+        video_output_dir=actual_output_dir,
     )
 
     # Print summary statistics
@@ -426,7 +443,7 @@ def main(_):
             "episode_metrics": episode_metrics,
         }
 
-        metrics_file = os.path.join(FLAGS.video_output_dir, "evaluation_metrics.json")
+        metrics_file = os.path.join(actual_output_dir, "evaluation_metrics.json")
         with open(metrics_file, "w") as f:
             json.dump(results, f, indent=2)
         print(f"\nMetrics saved to: {metrics_file}")
@@ -439,7 +456,7 @@ def main(_):
         for i, images in enumerate(videos):
             if images:  # Check if images were collected
                 video_path = os.path.join(
-                    FLAGS.video_output_dir,
+                    actual_output_dir,
                     f"highway_eval_{policy_name}_episode_{i}.mp4",
                 )
                 try:
@@ -450,7 +467,7 @@ def main(_):
                 except Exception as e:
                     print(f"  Error saving video {i}: {e}")
 
-    print(f"\nEvaluation complete! Results saved to: {FLAGS.video_output_dir}")
+    print(f"\nEvaluation complete! Results saved to: {actual_output_dir}")
 
 
 if __name__ == "__main__":
