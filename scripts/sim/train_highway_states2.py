@@ -12,7 +12,7 @@ from gymnasium.wrappers import (
     FlattenObservation,
     RecordVideo,
 )
-from gymnasium.vector import AsyncVectorEnv
+from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 import gym as old_gym  # Import old gym for spaces compatibility
 import numpy as np
 import threading
@@ -52,13 +52,13 @@ flags.DEFINE_string(
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_integer("eval_episodes", 16, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("log_interval", 500, "Logging interval.")
-flags.DEFINE_integer("eval_interval", 20000, "Eval interval.")
+flags.DEFINE_integer("eval_interval", 25000, "Eval interval.")
 flags.DEFINE_integer("batch_size", 128, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
-    "start_training", int(2e3), "Number of training steps to start training."
+    "start_training", int(1e3), "Number of training steps to start training."
 )
-flags.DEFINE_integer("replay_buffer_size", 40000, "Capacity of the replay buffer.")
+flags.DEFINE_integer("replay_buffer_size", 60000, "Capacity of the replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("save_video", False, "Save videos during evaluation.")
 flags.DEFINE_boolean("record_video", False, "Record videos during training.")
@@ -125,6 +125,7 @@ class AsyncEnvStepper:
         self.speed_ema = 0.0
         self.collision_ema = 0.0
         self.ema_beta = 3e-4
+        self.offroad_termination_counter = 0
 
     def start(self, initial_observations, initial_infos):
         """Start the async environment stepping thread."""
@@ -160,10 +161,10 @@ class AsyncEnvStepper:
                 actions, step_num = self.action_queue.get(timeout=None)
 
                 # Step environment
-                step_results = self._step_environment(actions, step_num)
+                next_observations = self._step_environment(actions, step_num)
 
                 # Put results in result queue
-                self.result_queue.put(step_results)
+                self.result_queue.put(next_observations)
 
             except queue.Empty:
                 continue
@@ -173,34 +174,48 @@ class AsyncEnvStepper:
 
     def _step_environment(self, actions, step_num):
         """Execute a single environment step and process results."""
+        # print(f"Stepping environment at step {step_num}")
         # Step the vectorized environment
         next_observations, rewards, terminations, truncations, infos = self.envs.step(
             actions
         )
+        # Handle episode terminations and create masks
+        dones = terminations | truncations
+        masks = 1.0 - dones.astype(float)
 
-        # Process statistics
-        collision_indicators = np.zeros(self.num_envs)
-        ego_speeds = np.zeros(self.num_envs)
+        if np.any(dones):
+            # Handle `final_observation` in case of a truncation or termination
+            real_next_observations = next_observations.copy()
+            for idx in np.where(dones)[0]:
+                real_next_observations[idx] = infos["final_obs"][idx]
 
-        for env_idx in range(self.num_envs):
-            # Check for collision from highway-env reward components
-            if "rewards" in infos and infos["rewards"] is not None:
-                if (
-                    isinstance(infos["rewards"], list)
-                    and len(infos["rewards"]) > env_idx
-                ):
-                    env_rewards = infos["rewards"][env_idx]
-                    if env_rewards is not None and "collision_reward" in env_rewards:
-                        collision_indicators[env_idx] = (
-                            1.0 if env_rewards["collision_reward"] > 0.0 else 0.0
-                        )
+            episode_infos = infos["final_info"]["episode"]
+            r = episode_infos["r"][dones].mean()
+            l = episode_infos["l"][dones].mean()
+            t = episode_infos["t"][dones].mean()
+            wandb.log(
+                {
+                    "training/return": r,
+                    "training/length": l,
+                    "training/time": t,
+                },
+                step=step_num,
+            )
 
-            # Extract ego speed for logging
-            obs_reshaped = next_observations[env_idx].reshape(15, 6)
-            present_vehicles = obs_reshaped[obs_reshaped[:, 0] > 0.5]
-            if len(present_vehicles) > 0:
-                ego_vehicle = present_vehicles[0]
-                ego_speeds[env_idx] = ego_vehicle[3]  # vx of ego vehicle
+            ego_speeds = infos["speed"].copy()
+            ego_speeds[dones] = infos["final_info"]["speed"][dones]
+            # all that are not done are not crashed anyway
+            collision_indicators = infos["final_info"]["crashed"].astype(float)
+
+            offroad_terminations = (
+                infos["final_info"]["rewards"]["on_road_reward"][dones] == 0.0
+            )
+            self.offroad_termination_counter += np.sum(offroad_terminations)
+
+        else:
+            real_next_observations = next_observations
+            ego_speeds = infos["speed"]
+            collision_indicators = infos["crashed"].astype(float)
 
         # Update EMAs
         self.speed_ema = (1 - self.ema_beta) * self.speed_ema + self.ema_beta * np.mean(
@@ -215,36 +230,26 @@ class AsyncEnvStepper:
         if step_num % self.log_interval == 0:
             wandb.log(
                 {
-                    "training/speed_ema": self.speed_ema,
-                    "training/collision_ema": self.collision_ema,
-                    "training/collision_counter": self.collision_counter,
+                    "speed_ema": self.speed_ema,
+                    "collision_ema": self.collision_ema,
+                    "collision_counter": self.collision_counter,
+                    "offroad_terminations": self.offroad_termination_counter,
                 },
                 step=step_num,
             )
 
-        # Handle episode terminations and create masks
-        dones = terminations | truncations
-        masks = 1.0 - dones.astype(float)
-
-        # Handle `final_observation` in case of truncation
-        real_next_observations = next_observations.copy()
-        for idx, trunc in enumerate(truncations):
-            if trunc:
-                if "final_observation" in infos and idx < len(
-                    infos["final_observation"]
-                ):
-                    if infos["final_observation"][idx] is not None:
-                        real_next_observations[idx] = infos["final_observation"][idx]
-
         # Add experiences to replay buffer
         for env_idx in range(self.num_envs):
+
+            done = dones[env_idx]
+
             self.replay_buffer.insert(
                 dict(
                     observations=self.current_observations[env_idx],
                     actions=actions[env_idx],
                     rewards=rewards[env_idx],
                     masks=masks[env_idx],
-                    dones=dones[env_idx],
+                    dones=done,
                     next_observations=real_next_observations[env_idx],
                 )
             )
@@ -254,18 +259,7 @@ class AsyncEnvStepper:
         self.current_infos = infos
         self.total_steps += 1
 
-        # Log episode statistics from vectorized environment
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info is not None and "episode" in info:
-                    wandb_log = {
-                        f"training/return": info["episode"]["r"],
-                        f"training/length": info["episode"]["l"],
-                        f"training/time": info["episode"]["t"],
-                    }
-                    wandb.log(wandb_log, step=step_num)
-
-        return True
+        return next_observations
 
 
 def make_env(env_name, highway_config, seed, idx):
@@ -374,11 +368,13 @@ def main(_):
     }
 
     # Create vectorized environments
-    envs = AsyncVectorEnv(
+    envs = SyncVectorEnv(
+        # envs = AsyncVectorEnv(
         [
             make_env(FLAGS.env_name, highway_config, FLAGS.seed, i)
             for i in range(FLAGS.num_envs)
-        ]
+        ],
+        autoreset_mode="SameStep",
     )
 
     # Create single evaluation environment
@@ -469,11 +465,8 @@ def main(_):
     )
     async_stepper.start(observations, infos)
 
-    # Keep track of current observations for action sampling
-    current_observations = observations
-
-    # first action so that env can run in the background
-    async_stepper.queue_actions(envs.action_space.sample(), 0)
+    # first action so that env can run in the background (always lagging behind one action)
+    # async_stepper.queue_actions(envs.action_space.sample(), 0)
 
     try:
         for i in pbar:
@@ -488,7 +481,7 @@ def main(_):
             else:
                 # Sample actions from agent using current observations
                 actions, agent = agent.sample_actions(
-                    current_observations, output_range=output_range
+                    observations, output_range=output_range
                 )
 
             if FLAGS.ramp_action == "linear":
@@ -502,164 +495,165 @@ def main(_):
                 # Queue full, skip this step or handle differently
                 print(f"Warning: Action queue full at step {i}")
 
-            # Just waiting on a true result to sync
-            _ = async_stepper.get_results(timeout=None)
+            observations = async_stepper.get_results(timeout=None)
 
-        if i >= FLAGS.start_training:
-            batch = next(replay_buffer_iterator)
+            if i >= FLAGS.start_training:
+                batch = next(replay_buffer_iterator)
 
-            if FLAGS.expert_replay_buffer:
-                expert_batch = next(expert_replay_buffer_iterator)
-                # Mix expert and online data
-                for key in batch.keys():
-                    batch[key] = np.concatenate(
-                        [
-                            batch[key][: FLAGS.batch_size // 2],
-                            expert_batch[key][: FLAGS.batch_size // 2],
-                        ],
-                        axis=0,
-                    )
+                if FLAGS.expert_replay_buffer:
+                    expert_batch = next(expert_replay_buffer_iterator)
+                    # Mix expert and online data
+                    for key in batch.keys():
+                        batch[key] = np.concatenate(
+                            [
+                                batch[key][: FLAGS.batch_size // 2],
+                                expert_batch[key][: FLAGS.batch_size // 2],
+                            ],
+                            axis=0,
+                        )
 
-            if FLAGS.ramp_action == "step":
-                action_max[1] = max_action_schedule(i)
+                if FLAGS.ramp_action == "step":
+                    action_max[1] = max_action_schedule(i)
 
-            output_range = (action_min, action_max)
+                output_range = (action_min, action_max)
 
-            mini_batch_output_range = (
-                jnp.tile(output_range[0], (FLAGS.batch_size * FLAGS.utd_ratio, 1)),
-                jnp.tile(output_range[1], (FLAGS.batch_size * FLAGS.utd_ratio, 1)),
-            )
-
-            agent, update_info = agent.update(
-                batch, utd_ratio=FLAGS.utd_ratio, output_range=mini_batch_output_range
-            )
-
-            if i % FLAGS.log_interval == 0:
-                for k, v in update_info.items():
-                    wandb.log({f"training/{k}": v}, step=i)
-
-                wandb.log(
-                    {
-                        "training/action_acc": np.mean(actions[:, 0]),
-                        "training/action_steer": np.mean(actions[:, 1]),
-                    },
-                    step=i,
+                mini_batch_output_range = (
+                    jnp.tile(output_range[0], (FLAGS.batch_size * FLAGS.utd_ratio, 1)),
+                    jnp.tile(output_range[1], (FLAGS.batch_size * FLAGS.utd_ratio, 1)),
                 )
 
-            if (
-                reset_interval is not None
-                and i % reset_interval == 0
-                and i < int(FLAGS.max_steps * 0.8)
-            ):
-                if FLAGS.reset_ensemble:
-                    agent, ensemble_info = agent.reset_ensemble_member()
-                    for k, v in ensemble_info.items():
-                        wandb.log({f"reset/{k}": v}, step=i)
-                else:
-                    agent = agent.reset(exclude=["critic", "target_critic"])
-
-        if i % FLAGS.eval_interval == 0:
-            evaluate(
-                agent,
-                eval_env,
-                FLAGS.eval_episodes,
-                output_range=output_range,
-            )
-
-        # Save checkpoints at specified intervals
-        if i % FLAGS.save_checkpoint_interval == 0 or i == 100:
-            try:
-                # Handle case where wandb.run.name might be None (offline mode)
-                run_name = (
-                    wandb.run.name
-                    if wandb.run.name is not None
-                    else f"highway_run_{FLAGS.seed}"
-                )
-                policy_folder = os.path.abspath(
-                    os.path.join(FLAGS.checkpoint_dir, run_name)
-                )
-                os.makedirs(policy_folder, exist_ok=True)
-
-                # Convert config to regular dict to avoid serialization issues
-                config_dict = dict(
-                    FLAGS.config
-                )  # Use dict() constructor for ConfigDict
-
-                # Convert flags to regular dict
-                flags_dict = {}
-                for key, value in FLAGS.flag_values_dict().items():
-                    if key != "config":  # Skip config to avoid circular reference
-                        try:
-                            # Handle different types properly
-                            if hasattr(value, "to_dict"):
-                                flags_dict[key] = value.to_dict()
-                            elif (
-                                isinstance(value, (str, int, float, bool))
-                                or value is None
-                            ):
-                                flags_dict[key] = value
-                            else:
-                                flags_dict[key] = str(
-                                    value
-                                )  # Convert complex types to string
-                        except Exception as e:
-                            print(f"Warning: Could not serialize flag {key}: {e}")
-                            flags_dict[key] = str(value)
-
-                param_dict = {
-                    "actor": agent.actor,
-                    "critic": agent.critic,
-                    "target_critic_params": agent.target_critic,
-                    "temp": agent.temp,
-                    "rng": agent.rng,
-                    "config": config_dict,  # Save training configuration as regular dict
-                    "training_flags": flags_dict,  # Save all training flags as regular dict
-                }
-
-                # Config and flags prepared for saving
-                if hasattr(agent, "limits"):
-                    param_dict["limits"] = agent.limits
-                if hasattr(agent, "q_entropy_lagrange"):
-                    param_dict["q_entropy_lagrange"] = agent.q_entropy_lagrange
-
-                # Save main model checkpoint using Orbax
-                checkpoints.save_checkpoint(
-                    policy_folder, param_dict, step=i, keep=FLAGS.keep_checkpoints
+                agent, update_info = agent.update(
+                    batch,
+                    utd_ratio=FLAGS.utd_ratio,
+                    output_range=mini_batch_output_range,
                 )
 
-                # Save config separately using pickle (more reliable for non-JAX data)
-                import pickle
+                if i % FLAGS.log_interval == 0:
+                    for k, v in update_info.items():
+                        wandb.log({f"training/{k}": v}, step=i)
 
-                config_file = os.path.join(policy_folder, f"config_{i}.pkl")
-                with open(config_file, "wb") as f:
-                    pickle.dump(
+                    wandb.log(
                         {
-                            "config": config_dict,
-                            "training_flags": flags_dict,
-                            "highway_env_config": highway_config,  # Save environment configuration
+                            "training/action_acc": np.mean(actions[:, 0]),
+                            "training/action_steer": np.mean(actions[:, 1]),
                         },
-                        f,
+                        step=i,
                     )
-                print(f"Saved checkpoint at step {i} to {policy_folder}")
-            except Exception as e:
-                print(f"Cannot save checkpoints: {e}")
 
-        pbar.set_description(
-            f"Step {i}, Speed EMA: {async_stepper.speed_ema:.2f}, Collision EMA: {async_stepper.collision_ema:.3f}, Queue Size: {async_stepper.action_queue.qsize()}"
-        )
+                if (
+                    reset_interval is not None
+                    and i % reset_interval == 0
+                    and i < int(FLAGS.max_steps * 0.8)
+                ):
+                    if FLAGS.reset_ensemble:
+                        agent, ensemble_info = agent.reset_ensemble_member()
+                        for k, v in ensemble_info.items():
+                            wandb.log({f"reset/{k}": v}, step=i)
+                    else:
+                        agent = agent.reset(exclude=["critic", "target_critic"])
 
-        if FLAGS.save_buffer and i % FLAGS.save_buffer_interval == 0:
-            with open(os.path.join(FLAGS.save_dir, f"buffer_{i}.pkl"), "wb") as f:
-                pickle.dump(replay_buffer, f)
-
-            if i % FLAGS.log_interval == 0:
-                wandb.log(
-                    {
-                        "training/action_queue_size": async_stepper.action_queue.qsize(),
-                        "training/result_queue_size": async_stepper.result_queue.qsize(),
-                    },
-                    step=i,
+            if i % FLAGS.eval_interval == 0:
+                evaluate(
+                    agent,
+                    eval_env,
+                    FLAGS.eval_episodes,
+                    output_range=output_range,
                 )
+
+            # Save checkpoints at specified intervals
+            if i % FLAGS.save_checkpoint_interval == 0 or i == 100:
+                try:
+                    # Handle case where wandb.run.name might be None (offline mode)
+                    run_name = (
+                        wandb.run.name
+                        if wandb.run.name is not None
+                        else f"highway_run_{FLAGS.seed}"
+                    )
+                    policy_folder = os.path.abspath(
+                        os.path.join(FLAGS.checkpoint_dir, run_name)
+                    )
+                    os.makedirs(policy_folder, exist_ok=True)
+
+                    # Convert config to regular dict to avoid serialization issues
+                    config_dict = dict(
+                        FLAGS.config
+                    )  # Use dict() constructor for ConfigDict
+
+                    # Convert flags to regular dict
+                    flags_dict = {}
+                    for key, value in FLAGS.flag_values_dict().items():
+                        if key != "config":  # Skip config to avoid circular reference
+                            try:
+                                # Handle different types properly
+                                if hasattr(value, "to_dict"):
+                                    flags_dict[key] = value.to_dict()
+                                elif (
+                                    isinstance(value, (str, int, float, bool))
+                                    or value is None
+                                ):
+                                    flags_dict[key] = value
+                                else:
+                                    flags_dict[key] = str(
+                                        value
+                                    )  # Convert complex types to string
+                            except Exception as e:
+                                print(f"Warning: Could not serialize flag {key}: {e}")
+                                flags_dict[key] = str(value)
+
+                    param_dict = {
+                        "actor": agent.actor,
+                        "critic": agent.critic,
+                        "target_critic_params": agent.target_critic,
+                        "temp": agent.temp,
+                        "rng": agent.rng,
+                        "config": config_dict,  # Save training configuration as regular dict
+                        "training_flags": flags_dict,  # Save all training flags as regular dict
+                    }
+
+                    # Config and flags prepared for saving
+                    if hasattr(agent, "limits"):
+                        param_dict["limits"] = agent.limits
+                    if hasattr(agent, "q_entropy_lagrange"):
+                        param_dict["q_entropy_lagrange"] = agent.q_entropy_lagrange
+
+                    # Save main model checkpoint using Orbax
+                    checkpoints.save_checkpoint(
+                        policy_folder, param_dict, step=i, keep=FLAGS.keep_checkpoints
+                    )
+
+                    # Save config separately using pickle (more reliable for non-JAX data)
+                    import pickle
+
+                    config_file = os.path.join(policy_folder, f"config_{i}.pkl")
+                    with open(config_file, "wb") as f:
+                        pickle.dump(
+                            {
+                                "config": config_dict,
+                                "training_flags": flags_dict,
+                                "highway_env_config": highway_config,  # Save environment configuration
+                            },
+                            f,
+                        )
+                    print(f"Saved checkpoint at step {i} to {policy_folder}")
+                except Exception as e:
+                    print(f"Cannot save checkpoints: {e}")
+
+            pbar.set_description(
+                f"Step {i}, Speed EMA: {async_stepper.speed_ema:.2f}, Collision EMA: {async_stepper.collision_ema:.3f}, Buffer: {len(replay_buffer)}"
+            )
+
+            if FLAGS.save_buffer and i % FLAGS.save_buffer_interval == 0:
+                with open(os.path.join(FLAGS.save_dir, f"buffer_{i}.pkl"), "wb") as f:
+                    pickle.dump(replay_buffer, f)
+
+                # if i % FLAGS.log_interval == 0:
+                #     wandb.log(
+                #         {
+                #             "training/action_queue_size": async_stepper.action_queue.qsize(),
+                #             "training/result_queue_size": async_stepper.result_queue.qsize(),
+                #         },
+                #         step=i,
+                #     )
 
     finally:
         # Stop async stepper and clean up
