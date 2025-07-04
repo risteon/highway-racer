@@ -31,7 +31,7 @@ def get_config():
 
     # PointNet-specific parameters
     config.use_pointnet = True
-    config.pointnet_hidden_dims = (128, 128)
+    config.pointnet_hidden_dims = (128,)
     config.pointnet_reduce_fn = "max"
     config.pointnet_use_layer_norm = False
     config.pointnet_dropout_rate = None
