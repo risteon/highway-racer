@@ -23,6 +23,7 @@ from jaxrl5.networks import (
     StateActionValue,
     subsample_ensemble,
     PixelMultiplexer,
+    PointNetMLP,
 )
 
 
@@ -85,6 +86,12 @@ class SACLearner(Agent):
         init_temperature: float = 1.0,
         backup_entropy: bool = True,
         pixel_embeddings_key: Optional[str] = None,
+        # PointNet-specific parameters
+        use_pointnet: bool = False,
+        pointnet_hidden_dims: Sequence[int] = (128, 128),
+        pointnet_reduce_fn: str = "max",
+        pointnet_use_layer_norm: bool = False,
+        pointnet_dropout_rate: Optional[float] = None,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1812.05905
@@ -99,7 +106,20 @@ class SACLearner(Agent):
 
         rng = jax.random.PRNGKey(seed)
 
-        actor_base_cls = partial(MLP, hidden_dims=hidden_dims, activate_final=True)
+        # Actor network creation with optional PointNet
+        if use_pointnet:
+            actor_base_cls = partial(
+                PointNetMLP,
+                pointnet_hidden_dims=pointnet_hidden_dims,
+                final_hidden_dims=hidden_dims,
+                final_activate_final=True,
+                reduce_fn=pointnet_reduce_fn,
+                pointnet_use_layer_norm=pointnet_use_layer_norm,
+                pointnet_dropout_rate=pointnet_dropout_rate,
+            )
+        else:
+            actor_base_cls = partial(MLP, hidden_dims=hidden_dims, activate_final=True)
+        
         actor_cls = partial(TanhNormal, base_cls=actor_base_cls, action_dim=action_dim)
         if pixel_embeddings_key is not None:
             actor_def = PixelMultiplexer(
@@ -112,13 +132,29 @@ class SACLearner(Agent):
         else:
             actor_def = actor_cls()
 
-        critic_base_cls = partial(
-            MLP,
-            hidden_dims=hidden_dims,
-            activate_final=True,
-            dropout_rate=critic_dropout_rate,
-            use_layer_norm=critic_layer_norm,
-        )
+        # Critic network creation with optional PointNet
+        if use_pointnet:
+            critic_base_cls = partial(
+                PointNetMLP,
+                pointnet_hidden_dims=pointnet_hidden_dims,
+                final_hidden_dims=hidden_dims,
+                final_activate_final=True,
+                final_dropout_rate=critic_dropout_rate,
+                final_use_layer_norm=critic_layer_norm,
+                reduce_fn=pointnet_reduce_fn,
+                pointnet_use_layer_norm=pointnet_use_layer_norm,
+                pointnet_dropout_rate=pointnet_dropout_rate,
+                is_critic=True,  # Enable critic mode
+                action_dim=action_dim,  # Pass action dimension
+            )
+        else:
+            critic_base_cls = partial(
+                MLP,
+                hidden_dims=hidden_dims,
+                activate_final=True,
+                dropout_rate=critic_dropout_rate,
+                use_layer_norm=critic_layer_norm,
+            )
         critic_cls = partial(StateActionValue, base_cls=critic_base_cls)
         critic_cls = partial(Ensemble, net_cls=critic_cls, num=num_qs)
         if pixel_embeddings_key is not None:
