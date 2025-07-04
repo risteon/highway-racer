@@ -58,7 +58,7 @@ flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
     "start_training", int(1e3), "Number of training steps to start training."
 )
-flags.DEFINE_integer("replay_buffer_size", 60000, "Capacity of the replay buffer.")
+flags.DEFINE_integer("replay_buffer_size", 20000, "Capacity of the replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("save_video", False, "Save videos during evaluation.")
 flags.DEFINE_boolean("record_video", False, "Record videos during training.")
@@ -69,7 +69,7 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_string("checkpoint_dir", "policies", "Directory to save checkpoints.")
 flags.DEFINE_integer("keep_checkpoints", 10, "Number of checkpoints to keep.")
-flags.DEFINE_integer("utd_ratio", 8, "Updates per data point")
+flags.DEFINE_integer("utd_ratio", 4, "Updates per data point")
 flags.DEFINE_integer(
     "reset_interval",
     None,
@@ -357,8 +357,8 @@ def main(_):
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -5.0,
-        "right_lane_reward": 0.01,
-        "high_speed_reward": 0.7,
+        "right_lane_reward": 0.00,
+        "high_speed_reward": 1.0,
         "lane_change_reward": 0.0,
         "reward_speed_range": [10, 40],
         "simulation_frequency": 15,
