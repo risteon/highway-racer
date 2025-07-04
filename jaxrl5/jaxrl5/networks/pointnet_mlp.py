@@ -54,8 +54,8 @@ class PointNetMLP(nn.Module):
         
         Args:
             x: Input data, depends on mode:
-               - Actor mode: observation of shape (N, 6) or (N*6,)
-               - Critic mode: [observations, actions] of shape (N*6 + action_dim,)
+               - Actor mode: observation of shape (N, 6), (N*6,), (B, N, 6), or (B, N*6)
+               - Critic mode: [observations, actions] of shape (N*6 + action_dim,) or (B, N*6 + action_dim)
             training: Whether in training mode (for dropout)
             
         Returns:
@@ -66,28 +66,54 @@ class PointNetMLP(nn.Module):
             obs, actions = self._split_obs_actions(x)
             obs = self._preprocess_input(obs)
             
-            # Split ego and other vehicles from observations
-            ego_features = obs[0]  # (6,)
-            other_vehicles = obs[1:]  # (N-1, 6)
-            
-            # Process other vehicles with PointNet
-            aggregated_others = self._pointnet_process(other_vehicles, training)
-            
-            # Combine ego, aggregated others, and actions
-            combined_features = jnp.concatenate([ego_features, aggregated_others, actions])
+            # Handle batched vs single sample
+            if len(obs.shape) == 3:
+                # Batched: (B, N, 6)
+                batch_size = obs.shape[0]
+                ego_features = obs[:, 0, :]  # (B, 6)
+                other_vehicles = obs[:, 1:, :]  # (B, N-1, 6)
+                
+                # Process other vehicles with PointNet (batched)
+                aggregated_others = self._pointnet_process_batched(other_vehicles, training)
+                
+                # Combine ego, aggregated others, and actions
+                combined_features = jnp.concatenate([ego_features, aggregated_others, actions], axis=-1)
+            else:
+                # Single sample: (N, 6)
+                ego_features = obs[0]  # (6,)
+                other_vehicles = obs[1:]  # (N-1, 6)
+                
+                # Process other vehicles with PointNet
+                aggregated_others = self._pointnet_process(other_vehicles, training)
+                
+                # Combine ego, aggregated others, and actions
+                combined_features = jnp.concatenate([ego_features, aggregated_others, actions])
         else:
             # Actor mode: standard PointNet processing
             obs = self._preprocess_input(x)
             
-            # Split ego and other vehicles
-            ego_features = obs[0]  # (6,)
-            other_vehicles = obs[1:]  # (N-1, 6)
-            
-            # Process other vehicles with PointNet
-            aggregated_others = self._pointnet_process(other_vehicles, training)
-            
-            # Combine ego and aggregated others
-            combined_features = jnp.concatenate([ego_features, aggregated_others])
+            # Handle batched vs single sample
+            if len(obs.shape) == 3:
+                # Batched: (B, N, 6)
+                batch_size = obs.shape[0]
+                ego_features = obs[:, 0, :]  # (B, 6)
+                other_vehicles = obs[:, 1:, :]  # (B, N-1, 6)
+                
+                # Process other vehicles with PointNet (batched)
+                aggregated_others = self._pointnet_process_batched(other_vehicles, training)
+                
+                # Combine ego and aggregated others
+                combined_features = jnp.concatenate([ego_features, aggregated_others], axis=-1)
+            else:
+                # Single sample: (N, 6)
+                ego_features = obs[0]  # (6,)
+                other_vehicles = obs[1:]  # (N-1, 6)
+                
+                # Process other vehicles with PointNet
+                aggregated_others = self._pointnet_process(other_vehicles, training)
+                
+                # Combine ego and aggregated others
+                combined_features = jnp.concatenate([ego_features, aggregated_others])
         
         # Apply final MLP
         return self._final_mlp(combined_features, training)
@@ -122,6 +148,52 @@ class PointNetMLP(nn.Module):
             aggregated = jnp.mean(vehicle_embeddings, axis=0)
         elif self.reduce_fn == "sum":
             aggregated = jnp.sum(vehicle_embeddings, axis=0)
+        else:
+            raise ValueError(f"Unknown reduce_fn: {self.reduce_fn}")
+        
+        return aggregated
+
+    def _pointnet_process_batched(self, other_vehicles: jnp.ndarray, training: bool) -> jnp.ndarray:
+        """
+        Apply PointNet-style processing to batched other vehicles.
+        
+        Args:
+            other_vehicles: Other vehicle features of shape (B, N-1, 6)
+            training: Whether in training mode
+            
+        Returns:
+            Aggregated features of shape (B, pointnet_hidden_dims[-1])
+        """
+        batch_size, n_vehicles, _ = other_vehicles.shape
+        
+        # Handle case with no other vehicles
+        if n_vehicles == 0:
+            return jnp.zeros((batch_size, self.pointnet_hidden_dims[-1]))
+        
+        # Apply per-vehicle MLP using vmap
+        def process_single_vehicle(vehicle_features):
+            return self._pointnet_mlp(vehicle_features, training)
+        
+        # Reshape to apply vmap: (B, N-1, 6) -> (B*N-1, 6)
+        batch_size, n_vehicles, feature_dim = other_vehicles.shape
+        flattened_vehicles = other_vehicles.reshape(batch_size * n_vehicles, feature_dim)
+        
+        # Apply MLP to all vehicles: (B*N-1, 6) -> (B*N-1, hidden_dim)
+        vehicle_vmap = jax.vmap(process_single_vehicle)
+        flattened_embeddings = vehicle_vmap(flattened_vehicles)
+        
+        # Reshape back: (B*N-1, hidden_dim) -> (B, N-1, hidden_dim)
+        vehicle_embeddings = flattened_embeddings.reshape(
+            batch_size, n_vehicles, self.pointnet_hidden_dims[-1]
+        )
+        
+        # Aggregate using specified reduction function over vehicle dimension
+        if self.reduce_fn == "max":
+            aggregated = jnp.max(vehicle_embeddings, axis=1)  # (B, hidden_dim)
+        elif self.reduce_fn == "mean":
+            aggregated = jnp.mean(vehicle_embeddings, axis=1)  # (B, hidden_dim)
+        elif self.reduce_fn == "sum":
+            aggregated = jnp.sum(vehicle_embeddings, axis=1)  # (B, hidden_dim)
         else:
             raise ValueError(f"Unknown reduce_fn: {self.reduce_fn}")
         
@@ -184,20 +256,20 @@ class PointNetMLP(nn.Module):
 
     def _preprocess_input(self, x: jnp.ndarray) -> jnp.ndarray:
         """
-        Handle both flattened and unflattened inputs.
+        Handle both flattened and unflattened inputs, with or without batch dimension.
         
         Supports:
-        - Flattened: (N*6,) -> reshape to (N, 6) 
-        - Unflattened: (N, 6) -> pass through
+        - Single sample: (N*6,) -> (N, 6) or (N, 6) -> (N, 6)
+        - Batched: (B, N*6) -> (B, N, 6) or (B, N, 6) -> (B, N, 6)
         
         Args:
-            x: Input observation, either flattened or unflattened
+            x: Input observation, with various possible shapes
             
         Returns:
-            Reshaped observation of shape (N, 6)
+            Reshaped observation of shape (N, 6) or (B, N, 6)
         """
         if len(x.shape) == 1:
-            # Flattened input: (N*6,) -> (N, 6)
+            # Single sample, flattened: (N*6,) -> (N, 6)
             if x.shape[0] % self.vehicle_features != 0:
                 raise ValueError(
                     f"Flattened input size {x.shape[0]} not divisible by "
@@ -205,13 +277,28 @@ class PointNetMLP(nn.Module):
                 )
             n_vehicles = x.shape[0] // self.vehicle_features
             return x.reshape(n_vehicles, self.vehicle_features)
-        elif len(x.shape) == 2 and x.shape[1] == self.vehicle_features:
-            # Already correct shape: (N, 6)
+        elif len(x.shape) == 2:
+            if x.shape[1] == self.vehicle_features:
+                # Single sample, already correct: (N, 6) -> (N, 6)
+                return x
+            elif x.shape[1] % self.vehicle_features == 0:
+                # Batched, flattened: (B, N*6) -> (B, N, 6)
+                batch_size = x.shape[0]
+                n_vehicles = x.shape[1] // self.vehicle_features
+                return x.reshape(batch_size, n_vehicles, self.vehicle_features)
+            else:
+                raise ValueError(
+                    f"2D input last dimension {x.shape[1]} not divisible by "
+                    f"vehicle_features {self.vehicle_features}"
+                )
+        elif len(x.shape) == 3 and x.shape[2] == self.vehicle_features:
+            # Batched, already correct: (B, N, 6) -> (B, N, 6)
             return x
         else:
             raise ValueError(
-                f"Unexpected input shape: {x.shape}. Expected either "
-                f"(N*{self.vehicle_features},) or (N, {self.vehicle_features})"
+                f"Unexpected input shape: {x.shape}. Expected one of: "
+                f"(N*{self.vehicle_features},), (N, {self.vehicle_features}), "
+                f"(B, N*{self.vehicle_features}), or (B, N, {self.vehicle_features})"
             )
 
     def _split_obs_actions(self, x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -219,24 +306,41 @@ class PointNetMLP(nn.Module):
         Split concatenated observations and actions for critic mode.
         
         Args:
-            x: Concatenated [observations, actions] of shape (N*6 + action_dim,)
+            x: Concatenated [observations, actions] of shape:
+               - Single: (N*6 + action_dim,)
+               - Batched: (B, N*6 + action_dim)
             
         Returns:
-            obs: Observations of shape (N*6,)
-            actions: Actions of shape (action_dim,)
+            obs: Observations of shape (N*6,) or (B, N*6)
+            actions: Actions of shape (action_dim,) or (B, action_dim)
         """
-        if len(x.shape) != 1:
-            raise ValueError(f"Expected 1D input for critic mode, got shape {x.shape}")
-        
-        if x.shape[0] < self.action_dim:
-            raise ValueError(
-                f"Input too small for critic mode. Expected at least {self.action_dim} "
-                f"elements for actions, got {x.shape[0]}"
-            )
-        
-        # Split observations and actions
-        obs_size = x.shape[0] - self.action_dim
-        observations = x[:obs_size]  # First part: observations
-        actions = x[obs_size:]       # Last part: actions
+        if len(x.shape) == 1:
+            # Single sample
+            if x.shape[0] < self.action_dim:
+                raise ValueError(
+                    f"Input too small for critic mode. Expected at least {self.action_dim} "
+                    f"elements for actions, got {x.shape[0]}"
+                )
+            
+            # Split observations and actions
+            obs_size = x.shape[0] - self.action_dim
+            observations = x[:obs_size]  # First part: observations
+            actions = x[obs_size:]       # Last part: actions
+            
+        elif len(x.shape) == 2:
+            # Batched
+            if x.shape[1] < self.action_dim:
+                raise ValueError(
+                    f"Input too small for critic mode. Expected at least {self.action_dim} "
+                    f"elements for actions, got {x.shape[1]}"
+                )
+            
+            # Split observations and actions
+            obs_size = x.shape[1] - self.action_dim
+            observations = x[:, :obs_size]  # First part: observations (B, N*6)
+            actions = x[:, obs_size:]       # Last part: actions (B, action_dim)
+            
+        else:
+            raise ValueError(f"Expected 1D or 2D input for critic mode, got shape {x.shape}")
         
         return observations, actions
