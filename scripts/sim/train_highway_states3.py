@@ -58,7 +58,7 @@ flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
     "start_training", int(1e3), "Number of training steps to start training."
 )
-flags.DEFINE_integer("replay_buffer_size", 20000, "Capacity of the replay buffer.")
+flags.DEFINE_integer("replay_buffer_size", 40000, "Capacity of the replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("save_video", False, "Save videos during evaluation.")
 flags.DEFINE_boolean("record_video", False, "Record videos during training.")
@@ -359,13 +359,13 @@ def main(_):
     highway_config = {
         "observation": {
             "type": "Kinematics",
-            "vehicles_count": 2,
+            "vehicles_count": 15,
             "features": ["presence", "x", "y", "vx", "vy", "heading"],
             "normalize": False,
         },
         "action": {"type": "ContinuousAction"},
         "lanes_count": 4,
-        "vehicles_count": 1,
+        "vehicles_count": 14,
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -5.0,
