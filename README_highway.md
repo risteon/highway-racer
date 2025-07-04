@@ -309,12 +309,56 @@ Mean Min Distance: 8.45m
 Mean Ego Speed: 22.1 m/s
 ```
 
+## Network Architecture
+
+The RACER JAX SAC learner uses Multi-Layer Perceptron (MLP) networks for both actor and critic components:
+
+### Actor Network
+- **Architecture**: 2 hidden layers with 256 units each
+- **Activation**: Tanh (default)
+- **Initialization**: Xavier uniform
+- **Output**: Continuous actions via Normal distribution
+- **Configuration**: `actor_hidden_dims: (256, 256)` in config files
+
+### Critic Network
+- **Architecture**: 2 hidden layers with 256 units each (standard) or 3 layers with 512 units (quantile variant)
+- **Activation**: Tanh (default)
+- **Layer Normalization**: Enabled (`critic_layer_norm: True`)
+- **Dropout**: Optional during training (`critic_dropout_rate`)
+- **Ensemble**: 2 critics for robustness (`num_qs: 2`)
+- **Configuration**: `critic_hidden_dims: (256, 256)` in config files
+
+### MLP Implementation Details
+**Core MLP Class** (`jaxrl5/networks/mlp.py`):
+```python
+class MLP(nn.Module):
+    hidden_dims: Sequence[int]           # Layer sizes: (256, 256)
+    activations: Callable = nn.tanh      # Activation function
+    activate_final: bool = False         # Final layer activation
+    use_layer_norm: bool = False         # Layer normalization
+    scale_final: Optional[float] = None  # Final layer scaling
+    dropout_rate: Optional[float] = None # Dropout for regularization
+```
+
+### Distributional SAC Extensions
+For risk-sensitive learning, the critic networks output probability distributions:
+- **Distributional Q-Networks**: 51-151 atoms for value distribution modeling
+- **CVaR Integration**: Enables Conditional Value at Risk calculations
+- **Uncertainty Quantification**: Ensemble provides epistemic uncertainty
+
+### Architecture Configuration Files
+- `scripts/sim/configs/highway_distributional_config.py`: Standard (256, 256) architecture
+- `scripts/sim/configs/quantile_sac_config.py`: Larger (512, 512, 512) critic networks
+- `jaxrl5/agents/distributional_sac/distributional_agent.py`: Network instantiation
+
 ## Key Files
 - `scripts/sim/train_highway_states.py` - Standard single-threaded highway training script
 - `scripts/sim/train_highway_distributed.py` - **Distributed multi-process highway training script**
 - `scripts/sim/run_highway_policy.py` - Policy evaluation script
 - `scripts/sim/configs/highway_distributional_config.py` - Highway-specific RACER configuration
 - `scripts/sim/highway_safety_utils.py` - Shared safety reward functions and utilities
+- `jaxrl5/networks/mlp.py` - Core MLP network implementation
+- `jaxrl5/agents/distributional_sac/distributional_agent.py` - Network architecture definitions
 - Uses `highway-v0` environment with continuous action control and collision risk safety rewards
 
 ### Distributed Training Implementation

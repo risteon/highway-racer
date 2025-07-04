@@ -180,7 +180,7 @@ r = velocities_to_goal
 **Working Training Command (MuJoCo/Procedural)**:
 ```bash
 cd /home/risteon/workspace/gpudrive_docker/racer && \
-source /home/risteon/miniconda3/bin/activate racer && \
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate racer && \
 DISPLAY=:0 WANDB_MODE=offline python scripts/sim/train_online_states.py \
   --config scripts/sim/configs/distributional_limits_config.py \
   --world_name flat
@@ -190,7 +190,7 @@ DISPLAY=:0 WANDB_MODE=offline python scripts/sim/train_online_states.py \
 **Training Command for Highway-Env**:
 ```bash
 cd /home/risteon/workspace/gpudrive_docker/racer && \
-source /home/risteon/miniconda3/bin/activate racer && \
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate racer && \
 DISPLAY=:0 WANDB_MODE=offline python scripts/sim/train_highway_states.py \
   --config scripts/sim/configs/highway_distributional_config.py \
   --max_steps 100000
@@ -221,11 +221,20 @@ DISPLAY=:0 WANDB_MODE=offline python scripts/sim/train_highway_states.py \
   - Speed and safety EMA tracking for logging
 
 **Command Components**:
-- `source /home/risteon/miniconda3/bin/activate racer` - Activate racer conda environment
+- `source ~/miniconda3/etc/profile.d/conda.sh && conda activate racer` - Activate racer conda environment
 - `DISPLAY=:0` - Set virtual display for headless MuJoCo rendering
 - `WANDB_MODE=offline` - Run W&B in offline mode (no login required)
 - `--config` - Algorithm configuration file (cvar_risk set in config, not CLI)
 - `--world_name` - Terrain type: `flat`, `bumpy`, or `default`
+
+**Conda Environment Setup**:
+```bash
+# Activate conda (required before any racer commands)
+source ~/miniconda3/etc/profile.d/conda.sh
+
+# Then activate racer environment
+conda activate racer
+```
 
 **Alternative Usage** (if environment pre-activated):
 ```bash
@@ -281,7 +290,7 @@ vim scripts/sim/configs/my_config.py
 
 # 2. Start training (use working command with environment setup)
 cd /home/risteon/workspace/gpudrive_docker/racer && \
-source /home/risteon/miniconda3/bin/activate racer && \
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate racer && \
 DISPLAY=:0 WANDB_MODE=offline python scripts/sim/train_online_states.py \
   --config scripts/sim/configs/my_config.py \
   --world_name flat
