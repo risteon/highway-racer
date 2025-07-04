@@ -368,8 +368,8 @@ def main(_):
     }
 
     # Create vectorized environments
-    envs = SyncVectorEnv(
-        # envs = AsyncVectorEnv(
+    # envs = SyncVectorEnv(
+    envs = AsyncVectorEnv(
         [
             make_env(FLAGS.env_name, highway_config, FLAGS.seed, i)
             for i in range(FLAGS.num_envs)
