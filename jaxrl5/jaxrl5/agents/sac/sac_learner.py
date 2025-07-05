@@ -119,7 +119,7 @@ class SACLearner(Agent):
             )
         else:
             actor_base_cls = partial(MLP, hidden_dims=hidden_dims, activate_final=True)
-        
+
         actor_cls = partial(TanhNormal, base_cls=actor_base_cls, action_dim=action_dim)
         if pixel_embeddings_key is not None:
             actor_def = PixelMultiplexer(
@@ -280,9 +280,11 @@ class SACLearner(Agent):
             )  # training=True
             q = qs.mean(axis=0)
 
-            temp = self.temp.apply_fn({"params": self.temp.params})
+            # temp = self.temp.apply_fn({"params": self.temp.params})
             # use a lower bound for the temperature
             # temp = jnp.maximum(temp, 0.2)
+            # hardcode for testing
+            temp = 0.2
 
             actor_loss = (log_probs * temp - q).mean()
             return actor_loss, {
@@ -442,9 +444,10 @@ class SACLearner(Agent):
             jax.tree.map(lambda x: x[0], batched_output_range),
         )
 
-        if update_temperature:
+        if False and update_temperature:
             new_agent, temp_info = new_agent.update_temperature(actor_info["entropy"])
         else:
-            temp_info = {}
+            # testing hardcoded
+            temp_info = {"temperature": 0.2}
 
         return new_agent, {**actor_info, **critic_info, **temp_info}
