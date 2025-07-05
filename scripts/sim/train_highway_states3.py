@@ -2,6 +2,13 @@
 import os
 import pickle
 
+# Configure JAX for GPU/CPU usage BEFORE any other JAX imports
+import jax
+
+# Only use GPU for the main training process, force CPU for environment workers
+if "XLA_FLAGS" not in os.environ:
+    os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=1"
+
 import collections
 from typing import Tuple
 import gymnasium as gym
@@ -54,6 +61,7 @@ flags.DEFINE_integer("eval_episodes", 16, "Number of episodes used for evaluatio
 flags.DEFINE_integer("log_interval", 500, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 25000, "Eval interval.")
 flags.DEFINE_integer("batch_size", 128, "Mini batch size.")
+# flags.DEFINE_integer("batch_size", 64, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
     "start_training", int(1e3), "Number of training steps to start training."
@@ -160,6 +168,10 @@ class AsyncEnvStepper:
 
     def _env_step_worker(self):
         """Worker thread that processes environment steps."""
+        # Force JAX to use CPU in this worker thread
+        # import jax
+        # jax.config.update('jax_platform_name', 'cpu')
+
         # start with initial resets for both envs
         self.current_observations[0], self.current_infos[0] = self.envs[0].reset(
             seed=self.seed
@@ -281,6 +293,12 @@ def make_env(env_name, highway_config, seed, idx):
     """Create a single environment for vectorization."""
 
     def thunk():
+        # Force JAX to use CPU in environment worker processes
+        import os
+
+        os.environ["JAX_PLATFORM_NAME"] = "cpu"
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
         env = gym.make(env_name, config=highway_config, render_mode=None)
         env = RecordEpisodeStatistics(env)
         env = FlattenObservation(env)  # Flatten (15, 6) -> (90,)
@@ -358,6 +376,12 @@ def max_action_schedule(i):
 
 
 def main(_):
+    # Ensure main process can use GPU for training
+    import jax
+
+    print(f"Main process JAX backend: {jax.default_backend()}")
+    print(f"Main process JAX devices: {jax.devices()}")
+
     # Highway environment setup
     highway_config = {
         "observation": {
@@ -508,6 +532,7 @@ def main(_):
                 actions, agent = agent.sample_actions(
                     observations, output_range=output_range
                 )
+                actions = np.array(actions)
 
             if FLAGS.ramp_action == "linear":
                 action_max[1] = max_action_schedule(i)
