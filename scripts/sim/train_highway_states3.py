@@ -362,17 +362,18 @@ def main(_):
     highway_config = {
         "observation": {
             "type": "Kinematics",
-            "vehicles_count": 15,
+            "vehicles_count": 8,
             "features": ["presence", "x", "y", "vx", "vy", "heading"],
             "normalize": False,
         },
         "action": {"type": "ContinuousAction"},
         "lanes_count": 4,
         "vehicles_count": FLAGS.num_vehicles,
+        "vehicles_density": 0.75,
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -5.0,
-        "right_lane_reward": 0.00,
+        "right_lane_reward": 0.1,
         "high_speed_reward": 1.0,
         "lane_change_reward": 0.0,
         "reward_speed_range": [10, 40],
