@@ -89,6 +89,9 @@ flags.DEFINE_float("action_penalty_end", 0.0, "End value for ramping up action")
 flags.DEFINE_boolean("reset_ensemble", False, "Reset one ensemble member at a time")
 flags.DEFINE_string("group_name_suffix", None, "Group name suffix")
 flags.DEFINE_integer("num_envs", 8, "Number of parallel environments")
+
+flags.DEFINE_integer("num_vehicles", 3, "Number of vehicles in the environment.")
+
 config_flags.DEFINE_config_file(
     "config",
     "configs/highway_sac_config.py",
@@ -365,7 +368,7 @@ def main(_):
         },
         "action": {"type": "ContinuousAction"},
         "lanes_count": 4,
-        "vehicles_count": 14,
+        "vehicles_count": FLAGS.num_vehicles,
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -5.0,
