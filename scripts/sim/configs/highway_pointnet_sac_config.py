@@ -23,7 +23,8 @@ def get_config():
     config.tau = 0.005
     config.init_temperature = 1.0
     # config.target_entropy = config_dict.placeholder(float)
-    config.target_entropy = -2.0
+    # config.target_entropy = -2.0
+    config.target_entropy = 0.0
     config.critic_weight_decay = 1e-3
     config.critic_layer_norm = True
 
@@ -33,7 +34,7 @@ def get_config():
     config.use_pointnet = True
     config.pointnet_hidden_dims = (128,)
     config.pointnet_reduce_fn = "max"
-    config.pointnet_use_layer_norm = False
+    config.pointnet_use_layer_norm = True
     config.pointnet_dropout_rate = None
 
     return config

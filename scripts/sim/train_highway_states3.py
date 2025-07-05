@@ -58,7 +58,7 @@ flags.DEFINE_integer("max_steps", int(2e6), "Number of training steps.")
 flags.DEFINE_integer(
     "start_training", int(1e3), "Number of training steps to start training."
 )
-flags.DEFINE_integer("replay_buffer_size", 40000, "Capacity of the replay buffer.")
+flags.DEFINE_integer("replay_buffer_size", 30000, "Capacity of the replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("save_video", False, "Save videos during evaluation.")
 flags.DEFINE_boolean("record_video", False, "Record videos during training.")
@@ -410,8 +410,12 @@ def main(_):
     kwargs.pop("safety_penalty", None)  # Remove safety_penalty (not used)
     kwargs.pop("max_offroad_steps", None)  # Remove max_offroad_steps
 
+    # agent = globals()[model_cls].create(
+    #     FLAGS.seed, envsA.single_observation_space, envsA.single_action_space, **kwargs
+    # )
+    # use full vectorized obs space
     agent = globals()[model_cls].create(
-        FLAGS.seed, envsA.single_observation_space, envsA.single_action_space, **kwargs
+        FLAGS.seed, envsA.observation_space, envsA.action_space, **kwargs
     )
 
     wandb_group_name = f"{FLAGS.config.group_name}"

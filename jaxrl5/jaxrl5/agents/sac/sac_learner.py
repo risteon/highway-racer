@@ -114,8 +114,9 @@ class SACLearner(Agent):
                 final_hidden_dims=hidden_dims,
                 final_activate_final=True,
                 reduce_fn=pointnet_reduce_fn,
-                pointnet_use_layer_norm=pointnet_use_layer_norm,
-                pointnet_dropout_rate=pointnet_dropout_rate,
+                # only control critic layer norm
+                # pointnet_use_layer_norm=False,
+                # pointnet_dropout_rate=pointnet_dropout_rate,
             )
         else:
             actor_base_cls = partial(MLP, hidden_dims=hidden_dims, activate_final=True)
@@ -280,11 +281,11 @@ class SACLearner(Agent):
             )  # training=True
             q = qs.mean(axis=0)
 
-            # temp = self.temp.apply_fn({"params": self.temp.params})
+            temp = self.temp.apply_fn({"params": self.temp.params})
             # use a lower bound for the temperature
             # temp = jnp.maximum(temp, 0.2)
             # hardcode for testing
-            temp = 0.2
+            # temp = 0.2
 
             actor_loss = (log_probs * temp - q).mean()
             return actor_loss, {
@@ -444,10 +445,11 @@ class SACLearner(Agent):
             jax.tree.map(lambda x: x[0], batched_output_range),
         )
 
-        if False and update_temperature:
+        if update_temperature:
             new_agent, temp_info = new_agent.update_temperature(actor_info["entropy"])
         else:
             # testing hardcoded
-            temp_info = {"temperature": 0.2}
+            # temp_info = {"temperature": 0.2}
+            temp_info = {}
 
         return new_agent, {**actor_info, **critic_info, **temp_info}
