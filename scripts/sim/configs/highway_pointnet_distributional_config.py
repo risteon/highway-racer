@@ -25,12 +25,15 @@ def get_config():
     config.init_temperature = 1.0
     config.target_entropy = config_dict.placeholder(float)
     # config.target_entropy = -0.5
+    # might use:
+    # config.target_entropy = -2.0
 
     # Adjusted distributional parameters for highway environment
     config.num_atoms = 151
     config.q_min = -10.0  # Adjusted for highway rewards (crashes, penalties)
     # config.q_max = 60.0  # Adjusted for highway rewards (goal completion)
-    config.q_max = 90.0  # Increased, better
+    # config.q_max = 90.0  # Increased, better
+    config.q_max = 120.0  # Increased.
     # config.cvar_risk = 0.9
     config.cvar_risk = 0.0
 
