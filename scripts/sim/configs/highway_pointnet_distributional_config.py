@@ -23,14 +23,14 @@ def get_config():
 
     config.tau = 0.005
     config.init_temperature = 1.0
-    # config.target_entropy = config_dict.placeholder(float)
-    config.target_entropy = -0.5
+    config.target_entropy = config_dict.placeholder(float)
+    # config.target_entropy = -0.5
 
     # Adjusted distributional parameters for highway environment
     config.num_atoms = 151
     config.q_min = -10.0  # Adjusted for highway rewards (crashes, penalties)
     # config.q_max = 60.0  # Adjusted for highway rewards (goal completion)
-    config.q_max = 90.0  # Increased
+    config.q_max = 90.0  # Increased, better
     # config.cvar_risk = 0.9
     config.cvar_risk = 0.0
 
@@ -42,9 +42,10 @@ def get_config():
     config.backup_entropy = False
     config.independent_ensemble = True  # new
 
-    config.q_entropy_target_diff = -0.01  # new, prev 0.5 default
+    # config.q_entropy_target_diff = -0.01  # new, prev 0.5 default
+    config.q_entropy_target_diff = 0.5  # new, try default for convergence
     config.q_entropy_lagrange_init = 1e-3  # new
-    config.q_entropy_lagrange_lr = 1e-4  # new
+    config.q_entropy_lagrange_lr = 1e-4  # new. 1e-3 in other config?
 
     # Highway-specific safety penalty
     config.safety_penalty = 0.0  # Small safety bonus coefficient
