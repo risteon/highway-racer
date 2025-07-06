@@ -76,7 +76,7 @@ flags.DEFINE_integer(
     "save_checkpoint_interval", 5000, "Steps between saving checkpoints."
 )
 flags.DEFINE_string("checkpoint_dir", "policies", "Directory to save checkpoints.")
-flags.DEFINE_integer("keep_checkpoints", 10, "Number of checkpoints to keep.")
+flags.DEFINE_integer("keep_checkpoints", 20, "Number of checkpoints to keep.")
 flags.DEFINE_integer("utd_ratio", 8, "Updates per data point")
 flags.DEFINE_integer(
     "reset_interval",
@@ -98,7 +98,7 @@ flags.DEFINE_boolean("reset_ensemble", False, "Reset one ensemble member at a ti
 flags.DEFINE_string("group_name_suffix", None, "Group name suffix")
 flags.DEFINE_integer("num_envs", 8, "Number of parallel environments")
 
-flags.DEFINE_integer("num_vehicles", 3, "Number of vehicles in the environment.")
+flags.DEFINE_integer("num_vehicles", 7, "Number of vehicles in the environment.")
 
 config_flags.DEFINE_config_file(
     "config",
