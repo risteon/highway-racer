@@ -28,8 +28,9 @@ def get_config():
 
     # Adjusted distributional parameters for highway environment
     config.num_atoms = 151
-    config.q_min = -5.0  # Adjusted for highway rewards (crashes, penalties)
-    config.q_max = 60.0  # Adjusted for highway rewards (goal completion)
+    config.q_min = -10.0  # Adjusted for highway rewards (crashes, penalties)
+    # config.q_max = 60.0  # Adjusted for highway rewards (goal completion)
+    config.q_max = 90.0  # Increased
     # config.cvar_risk = 0.9
     config.cvar_risk = 0.0
 
@@ -39,6 +40,11 @@ def get_config():
     config.limits_weight_decay = 1e-3
 
     config.backup_entropy = False
+    config.independent_ensemble = True  # new
+
+    config.q_entropy_target_diff = -0.01  # new, prev 0.5 default
+    config.q_entropy_lagrange_init = 1e-3  # new
+    config.q_entropy_lagrange_lr = 1e-4  # new
 
     # Highway-specific safety penalty
     config.safety_penalty = 0.0  # Small safety bonus coefficient
