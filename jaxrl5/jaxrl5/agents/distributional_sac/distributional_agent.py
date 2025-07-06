@@ -746,7 +746,7 @@ class DistributionalSACLearner(Agent):
         self, q_entropy_diff: float
     ) -> Tuple[Agent, Dict[str, float]]:
         def q_entropy_loss_fn(temp_params):
-            lagrange = self.temp.apply_fn({"params": temp_params})
+            lagrange = self.q_entropy_lagrange.apply_fn({"params": temp_params})
             lagrange_loss = (
                 lagrange * (self.q_entropy_target_diff - q_entropy_diff).mean()
             )
