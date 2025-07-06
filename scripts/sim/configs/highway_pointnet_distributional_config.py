@@ -23,10 +23,10 @@ def get_config():
 
     config.tau = 0.005
     config.init_temperature = 1.0
-    config.target_entropy = config_dict.placeholder(float)
+    # config.target_entropy = config_dict.placeholder(float)
     # config.target_entropy = -0.5
     # might use:
-    # config.target_entropy = -2.0
+    config.target_entropy = -2.0
 
     # Adjusted distributional parameters for highway environment
     config.num_atoms = 151
