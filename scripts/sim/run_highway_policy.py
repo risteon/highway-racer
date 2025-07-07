@@ -39,6 +39,7 @@ flags.DEFINE_integer("seed", 42, "Random seed")
 flags.DEFINE_boolean("render", True, "Enable video rendering")
 flags.DEFINE_boolean("save_metrics", True, "Save detailed metrics to JSON file")
 flags.DEFINE_string("env_name", "highway-v0", "Highway environment name")
+flags.DEFINE_integer("num_vehicles", 50, "Number of vehicles in environment")
 
 config_flags.DEFINE_config_file(
     "config",
@@ -280,7 +281,7 @@ def main(_):
         },
         "action": {"type": "ContinuousAction"},
         "lanes_count": 4,
-        "vehicles_count": 50,
+        "vehicles_count": FLAGS.num_vehicles,
         "duration": 40,
         "initial_spacing": 2,
         "collision_reward": -1,
@@ -310,15 +311,15 @@ def main(_):
     checkpoint_name = os.path.basename(FLAGS.policy_file)
     if not checkpoint_name:
         checkpoint_name = "unknown_checkpoint"
-    
+
     # Extract run name from policy path (parent directory of checkpoint)
     run_name = os.path.basename(os.path.dirname(FLAGS.policy_file))
     if not run_name:
         run_name = "unknown_run"
-    
+
     # Create evaluation folder under ./evaluation/<run-name>/<checkpoint-name>/
     auto_output_dir = os.path.join("evaluation", run_name, checkpoint_name)
-    
+
     # Use auto-generated path instead of command line flag
     actual_output_dir = auto_output_dir
     print(f"Auto-generated output directory: {actual_output_dir}")
@@ -333,7 +334,7 @@ def main(_):
         },
         "action": {"type": "ContinuousAction"},
         "lanes_count": 4,
-        "vehicles_count": 50,
+        "vehicles_count": FLAGS.num_vehicles,
         "duration": 40,  # seconds
         "initial_spacing": 2,
         "collision_reward": -1,
@@ -379,6 +380,10 @@ def main(_):
                 if value is not None:
                     highway_config[key] = value
                     print(f"Using {key} from checkpoint algorithm config: {value}")
+
+    # TEST IT OUT
+    highway_config["vehicles_count"] = FLAGS.num_vehicles
+    # highway_config["vehicles_density"] = 0.5
 
     # Create environment with potentially updated config
     render_mode = "rgb_array" if FLAGS.render else None
