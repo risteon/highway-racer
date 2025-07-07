@@ -220,7 +220,7 @@ class AsyncEnvStepper:
             offroad_terminations = (
                 infos["final_info"]["rewards"]["on_road_reward"] == 0.0
             )
-            OFFROAD_PENALTY = -10.0
+            OFFROAD_PENALTY = -2.0
             rewards += offroad_terminations * OFFROAD_PENALTY
 
             episode_infos = infos["final_info"]["episode"]
@@ -405,7 +405,7 @@ def main(_):
         "vehicles_density": 0.75,
         "duration": 40,  # seconds
         "initial_spacing": 2,
-        "collision_reward": -25.0,
+        "collision_reward": -10.0,
         "right_lane_reward": 0.1,
         "high_speed_reward": 0.5,
         "lane_change_reward": 0.0,
