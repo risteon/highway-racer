@@ -30,10 +30,11 @@ def get_config():
 
     # Adjusted distributional parameters for highway environment
     config.num_atoms = 151
-    config.q_min = -50.0  # Adjusted for highway rewards (crashes, penalties)
+    config.q_min = -40.0  # Adjusted for highway rewards (crashes, penalties)
     # config.q_max = 60.0  # Adjusted for highway rewards (goal completion)
     # config.q_max = 90.0  # Increased, better
-    config.q_max = 120.0  # Increased.
+    # config.q_max = 120.0  # Increased.
+    config.q_max = 80.0  # Lower speed return.
     # config.cvar_risk = 0.9
     config.cvar_risk = 0.0
     # config.cvar_risk = 0.2
