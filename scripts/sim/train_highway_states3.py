@@ -579,8 +579,29 @@ def main(_):
                 )
 
                 if i % FLAGS.log_interval == 0:
+                    # Handle Q-value distribution visualization
+                    log_dict = {}
                     for k, v in update_info.items():
-                        wandb.log({f"training/{k}": v}, step=i)
+                        if k == "critic_value_hist":
+                            # Handle Q-value distribution visualization
+                            probs, atoms = v
+                            
+                            # Convert to numpy
+                            probs_np = np.array(probs).flatten()
+                            atoms_np = np.array(atoms).flatten()
+                            
+                            # Create table for bar chart
+                            data = [[float(atom), float(prob)] for atom, prob in zip(atoms_np, probs_np)]
+                            table = wandb.Table(data=data, columns=["q_value", "probability"])
+                            
+                            log_dict[f"training/q_distribution_bar"] = wandb.plot.bar(
+                                table, "q_value", "probability",
+                                title="Q-Value Distribution"
+                            )
+                        else:
+                            log_dict[f"training/{k}"] = v
+                    
+                    wandb.log(log_dict, step=i)
 
                     wandb.log(
                         {
