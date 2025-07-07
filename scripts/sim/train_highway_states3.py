@@ -207,9 +207,12 @@ class AsyncEnvStepper:
             index
         ].step(actions)
         # Handle episode terminations and create masks
-        dones = terminations | truncations
-        masks = 1.0 - dones.astype(float)
-
+        # IMPORTANT: For Q-value bootstrapping, only use terminations (not truncations)
+        # - Terminated episodes: shouldn't bootstrap (mask=0.0) - true episode end
+        # - Truncated episodes: should bootstrap (mask=1.0) - episode continues but time limit hit
+        dones = terminations | truncations  # Combined done flag for episode boundary detection
+        masks = 1.0 - terminations.astype(float)  # Only terminations prevent bootstrapping
+        
         if np.any(dones):
             # Handle `final_observation` in case of a truncation or termination
             real_next_observations = next_observations.copy()
