@@ -216,8 +216,17 @@ class AsyncEnvStepper:
             for idx in np.where(dones)[0]:
                 real_next_observations[idx] = infos["final_obs"][idx]
 
+            # add penalty for offroad terminations
+            offroad_terminations = (
+                infos["final_info"]["rewards"]["on_road_reward"] == 0.0
+            )
+            OFFROAD_PENALTY = -25.0
+            rewards += offroad_terminations * OFFROAD_PENALTY
+
             episode_infos = infos["final_info"]["episode"]
-            r = episode_infos["r"][dones].mean()
+            r = (episode_infos["r"] + offroad_terminations * OFFROAD_PENALTY)[
+                dones
+            ].mean()
             l = episode_infos["l"][dones].mean()
             t = episode_infos["t"][dones].mean()
             wandb.log(
@@ -234,10 +243,10 @@ class AsyncEnvStepper:
             # all that are not done are not crashed anyway
             collision_indicators = infos["final_info"]["crashed"].astype(float)
 
-            offroad_terminations = (
-                infos["final_info"]["rewards"]["on_road_reward"][dones] == 0.0
-            )
-            self.offroad_termination_counter += np.sum(offroad_terminations)
+            # offroad_terminations = (
+            #     infos["final_info"]["rewards"]["on_road_reward"][dones] == 0.0
+            # )
+            self.offroad_termination_counter += np.sum(offroad_terminations[dones])
 
         else:
             real_next_observations = next_observations
@@ -398,7 +407,7 @@ def main(_):
         "initial_spacing": 2,
         "collision_reward": -50.0,
         "right_lane_reward": 0.1,
-        "high_speed_reward": 1.0,
+        "high_speed_reward": 0.5,
         "lane_change_reward": 0.0,
         "reward_speed_range": [10, 40],
         "simulation_frequency": 15,
