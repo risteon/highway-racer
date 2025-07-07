@@ -759,7 +759,8 @@ def main(_):
         with open(os.path.join(FLAGS.save_dir, "final_buffer.pkl"), "wb") as f:
             pickle.dump(replay_buffer, f)
 
-    envs.close()
+    envsA.close()
+    envsB.close()
 
 
 if __name__ == "__main__":
