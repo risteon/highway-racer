@@ -39,7 +39,7 @@ flags.DEFINE_integer("seed", 42, "Random seed")
 flags.DEFINE_boolean("render", True, "Enable video rendering")
 flags.DEFINE_boolean("save_metrics", True, "Save detailed metrics to JSON file")
 flags.DEFINE_string("env_name", "highway-v0", "Highway environment name")
-flags.DEFINE_integer("num_vehicles", 50, "Number of vehicles in environment")
+flags.DEFINE_integer("num_vehicles", 10, "Number of vehicles in environment")
 
 config_flags.DEFINE_config_file(
     "config",
@@ -284,7 +284,7 @@ def main(_):
         "vehicles_count": FLAGS.num_vehicles,
         "duration": 40,
         "initial_spacing": 2,
-        "collision_reward": -1,
+        "collision_reward": -10,
         "reward_speed_range": [30, 45],
         "simulation_frequency": 15,
         "policy_frequency": 5,
@@ -337,11 +337,14 @@ def main(_):
         "vehicles_count": FLAGS.num_vehicles,
         "duration": 40,  # seconds
         "initial_spacing": 2,
-        "collision_reward": -1,
-        "reward_speed_range": [30, 45],  # Default, may be overridden by checkpoint
+        "collision_reward": -10.0,
+        "right_lane_reward": 0.1,
+        "high_speed_reward": 0.5,
+        "lane_change_reward": 0.0,
+        "reward_speed_range": [10, 40],  # Default, may be overridden by checkpoint
         "simulation_frequency": 15,
         "policy_frequency": 5,
-        "offroad_terminal": False,  # Keep False to avoid early termination, use our enhanced detection
+        "offroad_terminal": True,  # Keep False to avoid early termination, use our enhanced detection
     }
 
     # Override environment config with checkpoint configs if available

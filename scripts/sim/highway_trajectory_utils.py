@@ -211,23 +211,27 @@ def run_highway_trajectory(
         # Take environment step
         next_obs, env_reward, done, truncated, info = env.step(action)
 
+        # add offroad penalty
+        if info["rewards"]["on_road_reward"] == 0.0:
+            env_reward -= 5.0
+
         # Store info for next frame's overlay
         last_env_reward = env_reward
         last_info = info
 
         # Calculate training reward using shared function
-        training_reward, reward_components = calculate_training_reward(
-            env,
-            env_reward,
-            info,
-            safety_bonus_coeff,
-            reward_speed_range=highway_config.get("reward_speed_range", [20, 50]),
-            next_obs=next_obs,
-        )
-        safety_reward = reward_components["safety_reward"]
+        # training_reward, reward_components = calculate_training_reward(
+        #     env,
+        #     env_reward,
+        #     info,
+        #     safety_bonus_coeff,
+        #     reward_speed_range=highway_config.get("reward_speed_range", [20, 50]),
+        #     next_obs=next_obs,
+        # )
+        # safety_reward = reward_components["safety_reward"]
 
         # Store reward components for next frame's overlay
-        last_reward_components = reward_components
+        last_reward_components = info["rewards"]
 
         # Extract vehicle information from observation for analysis
         obs_reshaped = obs.reshape(-1, 6)
@@ -254,8 +258,8 @@ def run_highway_trajectory(
             current_lane = -1
 
         # Track safety violations
-        if safety_reward < -0.5:  # Threshold for safety violation
-            safety_violations += 1
+        # if safety_reward < -0.5:  # Threshold for safety violation
+        #     safety_violations += 1
 
         # Track offroad status
         is_offroad = is_vehicle_offroad(env)
@@ -281,7 +285,7 @@ def run_highway_trajectory(
 
         # Update returns
         episode_return += env_reward
-        training_return += training_reward
+        # training_return += training_reward
         episode_length += 1
 
         # Store detailed step data for debug mode
@@ -290,11 +294,11 @@ def run_highway_trajectory(
                 {
                     "step": step,
                     "env_reward": env_reward,
-                    "training_reward": training_reward,
+                    # "training_reward": training_reward,
                     "speed": ego_speed,
                     "forward_speed": ego_forward_speed,
                     "lane": current_lane,
-                    "components": reward_components,
+                    "components": info["rewards"],
                 }
             )
 
@@ -302,7 +306,7 @@ def run_highway_trajectory(
             action_str = f"[{action[0]:.1f}, {action[1]:.1f}]"
             components_str = f"C:{info['rewards']['collision_reward']:.0f} R:{info['rewards']['right_lane_reward']:.2f} S:{info['rewards']['high_speed_reward']:.2f}"
             print(
-                f"{step:<4} | {action_str:<15} | {env_reward:<8.3f} | {training_reward:<9.3f} | {ego_speed:<6.1f} | {current_lane:<4} | {components_str}"
+                f"{step:<4} | {action_str:<15} | {env_reward:<8.3f} | {ego_speed:<6.1f} | {current_lane:<4} | {components_str}"
             )
 
         obs = next_obs
