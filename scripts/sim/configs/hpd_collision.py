@@ -35,9 +35,9 @@ def get_config():
     # config.q_max = 90.0  # Increased, better
     # config.q_max = 120.0  # Increased.
     config.q_max = 80.0  # Lower speed return.
-    # config.cvar_risk = 0.9
     config.cvar_risk = 0.0
     # config.cvar_risk = 0.2
+    config.cvar_risk = 0.5
     # config.cvar_risk = 0.8
     # config.cvar_risk = 0.9
 
