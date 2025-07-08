@@ -438,7 +438,7 @@ def main(_):
     temp_highway_config = {
         "observation": {
             "type": "Kinematics",
-            "vehicles_count": 15,
+            "vehicles_count": 8,
             "features": ["presence", "x", "y", "vx", "vy", "heading"],
             "normalize": False,
         },
@@ -451,7 +451,7 @@ def main(_):
         "reward_speed_range": [30, 45],
         "simulation_frequency": 15,
         "policy_frequency": 5,
-        "offroad_terminal": False,
+        "offroad_terminal": True,
     }
 
     # Temporarily create environment to get observation/action spaces for agent creation
@@ -495,7 +495,7 @@ def main(_):
     highway_config = {
         "observation": {
             "type": "Kinematics",
-            "vehicles_count": 15,
+            "vehicles_count": 8,
             "features": ["presence", "x", "y", "vx", "vy", "heading"],
             "normalize": False,
         },
@@ -504,11 +504,11 @@ def main(_):
         "vehicles_count": FLAGS.num_vehicles,
         "duration": 40,  # seconds
         "initial_spacing": 2,
-        "collision_reward": -1,
-        "reward_speed_range": [30, 45],  # Default, may be overridden by checkpoint
+        "collision_reward": -10,
+        "reward_speed_range": [10, 40],  # Default, may be overridden by checkpoint
         "simulation_frequency": 15,
         "policy_frequency": 5,
-        "offroad_terminal": False,  # Keep False to avoid early termination
+        "offroad_terminal": True,  # Keep False to avoid early termination
     }
 
     # Override environment config with checkpoint configs if available

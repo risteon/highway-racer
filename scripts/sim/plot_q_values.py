@@ -139,48 +139,74 @@ def create_static_analysis_plots(data, output_dir, plot_every_n=5, cvar_risk=0.9
     # Compute statistics for all actions
     stats_accel = compute_q_statistics(data['q_probs_accelerate'], data['q_atoms_accelerate'], cvar_risk)
     stats_brake = compute_q_statistics(data['q_probs_brake'], data['q_atoms_brake'], cvar_risk)
+    stats_continue = compute_q_statistics(data['q_probs_continue'], data['q_atoms_continue'], cvar_risk)
+    stats_steer_right = compute_q_statistics(data['q_probs_steer_right'], data['q_atoms_steer_right'], cvar_risk)
+    stats_steer_left = compute_q_statistics(data['q_probs_steer_left'], data['q_atoms_steer_left'], cvar_risk)
     stats_policy = compute_q_statistics(data['q_probs_policy'], data['q_atoms_policy'], cvar_risk)
     
-    # 1. Q-Value Evolution Over Time
+    # 1. Q-Value Evolution Over Time (2x2 grid with all 6 actions)
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     
-    # Expected Q-values
-    axes[0, 0].plot(stats_accel['ensemble_mean'], label='Accelerate', linewidth=2)
-    axes[0, 0].plot(stats_brake['ensemble_mean'], label='Brake', linewidth=2)
-    axes[0, 0].plot(stats_policy['ensemble_mean'], label='Policy Action', linewidth=2)
+    # Colors for each action
+    colors = {
+        'accelerate': 'blue',
+        'brake': 'orange', 
+        'continue': 'green',
+        'steer_right': 'red',
+        'steer_left': 'purple',
+        'policy': 'brown'
+    }
+    
+    # Expected Q-values (Top-left)
+    axes[0, 0].plot(stats_accel['ensemble_mean'], label='Accelerate', color=colors['accelerate'], linewidth=2)
+    axes[0, 0].plot(stats_brake['ensemble_mean'], label='Brake', color=colors['brake'], linewidth=2)
+    axes[0, 0].plot(stats_continue['ensemble_mean'], label='Continue', color=colors['continue'], linewidth=2)
+    axes[0, 0].plot(stats_steer_right['ensemble_mean'], label='Steer Right', color=colors['steer_right'], linewidth=2)
+    axes[0, 0].plot(stats_steer_left['ensemble_mean'], label='Steer Left', color=colors['steer_left'], linewidth=2)
+    axes[0, 0].plot(stats_policy['ensemble_mean'], label='Policy Action', color=colors['policy'], linewidth=2)
     axes[0, 0].fill_between(range(len(stats_accel['ensemble_mean'])), 
                            stats_accel['ensemble_mean'] - stats_accel['ensemble_std'],
-                           stats_accel['ensemble_mean'] + stats_accel['ensemble_std'], alpha=0.3)
+                           stats_accel['ensemble_mean'] + stats_accel['ensemble_std'], 
+                           alpha=0.3, color=colors['accelerate'])
     axes[0, 0].set_xlabel('Time Step')
     axes[0, 0].set_ylabel('Expected Q-Value')
     axes[0, 0].set_title('Q-Value Evolution (Expected Value)')
     axes[0, 0].legend()
     axes[0, 0].grid(True)
     
-    # CVaR Q-values (Risk-Sensitive)
-    axes[0, 1].plot(np.mean(stats_accel['cvar'], axis=-1), label=f'Accelerate (CVaR {cvar_risk})', linewidth=2)
-    axes[0, 1].plot(np.mean(stats_brake['cvar'], axis=-1), label=f'Brake (CVaR {cvar_risk})', linewidth=2)
-    axes[0, 1].plot(np.mean(stats_policy['cvar'], axis=-1), label=f'Policy Action (CVaR {cvar_risk})', linewidth=2)
+    # CVaR Q-values (Risk-Sensitive) (Top-right)
+    axes[0, 1].plot(np.mean(stats_accel['cvar'], axis=-1), label=f'Accelerate', color=colors['accelerate'], linewidth=2)
+    axes[0, 1].plot(np.mean(stats_brake['cvar'], axis=-1), label=f'Brake', color=colors['brake'], linewidth=2)
+    axes[0, 1].plot(np.mean(stats_continue['cvar'], axis=-1), label=f'Continue', color=colors['continue'], linewidth=2)
+    axes[0, 1].plot(np.mean(stats_steer_right['cvar'], axis=-1), label=f'Steer Right', color=colors['steer_right'], linewidth=2)
+    axes[0, 1].plot(np.mean(stats_steer_left['cvar'], axis=-1), label=f'Steer Left', color=colors['steer_left'], linewidth=2)
+    axes[0, 1].plot(np.mean(stats_policy['cvar'], axis=-1), label=f'Policy Action', color=colors['policy'], linewidth=2)
     axes[0, 1].set_xlabel('Time Step')
     axes[0, 1].set_ylabel('CVaR Q-Value')
     axes[0, 1].set_title(f'Risk-Sensitive Q-Values (CVaR α={cvar_risk})')
     axes[0, 1].legend()
     axes[0, 1].grid(True)
     
-    # Q-Value Uncertainty (Aleatoric)
-    axes[1, 0].plot(stats_accel['aleatoric_mean'], label='Accelerate', linewidth=2)
-    axes[1, 0].plot(stats_brake['aleatoric_mean'], label='Brake', linewidth=2)
-    axes[1, 0].plot(stats_policy['aleatoric_mean'], label='Policy Action', linewidth=2)
+    # Q-Value Uncertainty (Aleatoric) (Bottom-left)
+    axes[1, 0].plot(stats_accel['aleatoric_mean'], label='Accelerate', color=colors['accelerate'], linewidth=2)
+    axes[1, 0].plot(stats_brake['aleatoric_mean'], label='Brake', color=colors['brake'], linewidth=2)
+    axes[1, 0].plot(stats_continue['aleatoric_mean'], label='Continue', color=colors['continue'], linewidth=2)
+    axes[1, 0].plot(stats_steer_right['aleatoric_mean'], label='Steer Right', color=colors['steer_right'], linewidth=2)
+    axes[1, 0].plot(stats_steer_left['aleatoric_mean'], label='Steer Left', color=colors['steer_left'], linewidth=2)
+    axes[1, 0].plot(stats_policy['aleatoric_mean'], label='Policy Action', color=colors['policy'], linewidth=2)
     axes[1, 0].set_xlabel('Time Step')
     axes[1, 0].set_ylabel('Q-Value Std Dev')
     axes[1, 0].set_title('Aleatoric Uncertainty (Distribution Width)')
     axes[1, 0].legend()
     axes[1, 0].grid(True)
     
-    # Epistemic Uncertainty (Ensemble Disagreement)
-    axes[1, 1].plot(stats_accel['ensemble_std'], label='Accelerate', linewidth=2)
-    axes[1, 1].plot(stats_brake['ensemble_std'], label='Brake', linewidth=2)
-    axes[1, 1].plot(stats_policy['ensemble_std'], label='Policy Action', linewidth=2)
+    # Epistemic Uncertainty (Ensemble Disagreement) (Bottom-right)
+    axes[1, 1].plot(stats_accel['ensemble_std'], label='Accelerate', color=colors['accelerate'], linewidth=2)
+    axes[1, 1].plot(stats_brake['ensemble_std'], label='Brake', color=colors['brake'], linewidth=2)
+    axes[1, 1].plot(stats_continue['ensemble_std'], label='Continue', color=colors['continue'], linewidth=2)
+    axes[1, 1].plot(stats_steer_right['ensemble_std'], label='Steer Right', color=colors['steer_right'], linewidth=2)
+    axes[1, 1].plot(stats_steer_left['ensemble_std'], label='Steer Left', color=colors['steer_left'], linewidth=2)
+    axes[1, 1].plot(stats_policy['ensemble_std'], label='Policy Action', color=colors['policy'], linewidth=2)
     axes[1, 1].set_xlabel('Time Step')
     axes[1, 1].set_ylabel('Ensemble Std Dev')
     axes[1, 1].set_title('Epistemic Uncertainty (Ensemble Disagreement)')
@@ -191,87 +217,87 @@ def create_static_analysis_plots(data, output_dir, plot_every_n=5, cvar_risk=0.9
     plt.savefig(os.path.join(output_dir, 'q_value_evolution.png'), dpi=300, bbox_inches='tight')
     plt.close()
     
-    # 2. Q-Distribution Heatmaps for Selected Steps
-    n_plots = min(6, len(steps_to_plot))
-    fig, axes = plt.subplots(3, n_plots, figsize=(4*n_plots, 12))
+    # 2. Q-Distribution Heatmaps for Selected Steps (Extended for 6 actions)
+    n_plots = min(4, len(steps_to_plot))  # Show 4 time steps
+    fig, axes = plt.subplots(6, n_plots, figsize=(4*n_plots, 20))
     if n_plots == 1:
         axes = axes.reshape(-1, 1)
     
+    # Action order for display
+    action_names = ['accelerate', 'brake', 'continue', 'steer_right', 'steer_left', 'policy']
+    action_titles = ['Accelerate', 'Brake', 'Continue', 'Steer Right', 'Steer Left', 'Policy Action']
+    
     for i, step in enumerate(list(steps_to_plot)[:n_plots]):
-        # Get Q-distributions at this step (average over ensemble and squeeze batch dim)
-        q_probs_accel = np.mean(data['q_probs_accelerate'][step].squeeze(), axis=0)
-        q_atoms_accel = np.mean(data['q_atoms_accelerate'][step].squeeze(), axis=0)
-        q_probs_brake = np.mean(data['q_probs_brake'][step].squeeze(), axis=0)
-        q_atoms_brake = np.mean(data['q_atoms_brake'][step].squeeze(), axis=0)
-        q_probs_policy = np.mean(data['q_probs_policy'][step].squeeze(), axis=0)
-        q_atoms_policy = np.mean(data['q_atoms_policy'][step].squeeze(), axis=0)
-        
-        # Calculate bar width safely
-        if len(q_atoms_accel) > 1:
-            width_accel = (q_atoms_accel[1] - q_atoms_accel[0]) * 0.8
-        else:
-            width_accel = 1.0
-        
-        # Plot distributions
-        axes[0, i].bar(q_atoms_accel, q_probs_accel, width=width_accel, alpha=0.7)
-        axes[0, i].set_title(f'Accelerate (Step {step})')
-        axes[0, i].set_xlabel('Q-Value')
-        axes[0, i].set_ylabel('Probability')
-        
-        # Calculate bar widths safely for other plots
-        if len(q_atoms_brake) > 1:
-            width_brake = (q_atoms_brake[1] - q_atoms_brake[0]) * 0.8
-        else:
-            width_brake = 1.0
-        if len(q_atoms_policy) > 1:
-            width_policy = (q_atoms_policy[1] - q_atoms_policy[0]) * 0.8
-        else:
-            width_policy = 1.0
-        
-        axes[1, i].bar(q_atoms_brake, q_probs_brake, width=width_brake, alpha=0.7, color='orange')
-        axes[1, i].set_title(f'Brake (Step {step})')
-        axes[1, i].set_xlabel('Q-Value')
-        axes[1, i].set_ylabel('Probability')
-        
-        axes[2, i].bar(q_atoms_policy, q_probs_policy, width=width_policy, alpha=0.7, color='green')
-        axes[2, i].set_title(f'Policy Action (Step {step})')
-        axes[2, i].set_xlabel('Q-Value')
-        axes[2, i].set_ylabel('Probability')
+        for j, (action, title) in enumerate(zip(action_names, action_titles)):
+            # Get Q-distributions at this step (average over ensemble and squeeze batch dim)
+            q_probs = np.mean(data[f'q_probs_{action}'][step].squeeze(), axis=0)
+            q_atoms = np.mean(data[f'q_atoms_{action}'][step].squeeze(), axis=0)
+            
+            # Calculate bar width safely
+            if len(q_atoms) > 1:
+                width = (q_atoms[1] - q_atoms[0]) * 0.8
+            else:
+                width = 1.0
+            
+            # Plot distribution with action-specific color
+            axes[j, i].bar(q_atoms, q_probs, width=width, alpha=0.7, color=colors[action])
+            axes[j, i].set_title(f'{title} (Step {step})')
+            if j == len(action_names) - 1:  # Bottom row
+                axes[j, i].set_xlabel('Q-Value')
+            axes[j, i].set_ylabel('Probability')
+            axes[j, i].grid(True, alpha=0.3)
     
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'q_distributions_selected_steps.png'), dpi=300, bbox_inches='tight')
     plt.close()
     
-    # 3. Action Preference Analysis
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+    # 3. Simple Action Preference Analysis
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
     
-    # Q-value difference (Accelerate - Brake)
-    q_diff_mean = stats_accel['ensemble_mean'] - stats_brake['ensemble_mean']
-    q_diff_cvar = np.mean(stats_accel['cvar'], axis=-1) - np.mean(stats_brake['cvar'], axis=-1)
+    # Action preference heatmap (left)
+    all_actions = ['accelerate', 'brake', 'continue', 'steer_right', 'steer_left']
+    stats_dict_all = {
+        'accelerate': stats_accel,
+        'brake': stats_brake,
+        'continue': stats_continue,
+        'steer_right': stats_steer_right,
+        'steer_left': stats_steer_left
+    }
+    action_preferences = np.zeros((len(all_actions), episode_length))
+    for step in range(episode_length):
+        step_q_values = []
+        for action in all_actions:
+            action_stats = stats_dict_all[action]
+            step_q_values.append(action_stats['ensemble_mean'][step])
+        
+        # Normalize to get preference scores (softmax-like)
+        step_q_values = np.array(step_q_values)
+        exp_values = np.exp(step_q_values - np.max(step_q_values))
+        preferences = exp_values / np.sum(exp_values)
+        action_preferences[:, step] = preferences
     
-    ax1.plot(q_diff_mean, label='Expected Q-Value Difference', linewidth=2)
-    ax1.plot(q_diff_cvar, label=f'CVaR Difference (α={cvar_risk})', linewidth=2)
-    ax1.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    ax1.fill_between(range(len(q_diff_mean)), 0, q_diff_mean, 
-                     where=(q_diff_mean > 0), alpha=0.3, color='blue', label='Prefer Accelerate')
-    ax1.fill_between(range(len(q_diff_mean)), 0, q_diff_mean, 
-                     where=(q_diff_mean < 0), alpha=0.3, color='red', label='Prefer Brake')
-    ax1.set_xlabel('Time Step')
-    ax1.set_ylabel('Q-Value Difference')
-    ax1.set_title('Action Preference: Accelerate vs Brake')
-    ax1.legend()
-    ax1.grid(True)
+    im1 = axes[0].imshow(action_preferences, aspect='auto', cmap='RdYlBu_r', interpolation='nearest')
+    axes[0].set_xlabel('Time Step')
+    axes[0].set_ylabel('Action')
+    axes[0].set_title('Action Preference Heatmap')
+    axes[0].set_yticks(range(len(all_actions)))
+    axes[0].set_yticklabels([a.replace('_', ' ').title() for a in all_actions])
+    plt.colorbar(im1, ax=axes[0], label='Preference Score')
     
-    # Actual actions taken
-    actions = data['actions_taken']
-    acceleration_actions = actions[:, 1]  # Second dimension is acceleration
-    ax2.plot(acceleration_actions, label='Acceleration Actions', linewidth=2, color='purple')
-    ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    ax2.set_xlabel('Time Step')
-    ax2.set_ylabel('Acceleration Action')
-    ax2.set_title('Actual Actions Taken by Policy')
-    ax2.legend()
-    ax2.grid(True)
+    # Q-value differences (right)
+    q_diff_accel_brake = stats_accel['ensemble_mean'] - stats_brake['ensemble_mean']
+    q_diff_continue_others = stats_continue['ensemble_mean'] - np.mean([
+        stats_accel['ensemble_mean'], stats_brake['ensemble_mean'], 
+        stats_steer_right['ensemble_mean'], stats_steer_left['ensemble_mean']], axis=0)
+    
+    axes[1].plot(q_diff_accel_brake, label='Accelerate - Brake', color='blue', linewidth=2)
+    axes[1].plot(q_diff_continue_others, label='Continue - Others Avg', color='green', linewidth=2)
+    axes[1].axhline(y=0, color='black', linestyle='--', alpha=0.5)
+    axes[1].set_xlabel('Time Step')
+    axes[1].set_ylabel('Q-Value Difference')
+    axes[1].set_title('Action Preference Differences')
+    axes[1].legend()
+    axes[1].grid(True)
     
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'action_preference_analysis.png'), dpi=300, bbox_inches='tight')
@@ -347,7 +373,10 @@ def create_animated_visualization(data, output_dir, fps=5):
         q_atoms_policy = np.mean(data['q_atoms_policy'][step], axis=0)
         
         # Plot Q-distributions
-        width = (q_atoms_accel[1] - q_atoms_accel[0]) * 0.8
+        if len(q_atoms_accel) > 1:
+            width = (q_atoms_accel[1] - q_atoms_accel[0]) * 0.8
+        else:
+            width = 1.0
         
         ax_accel.bar(q_atoms_accel, q_probs_accel, width=width, alpha=0.7, color='blue')
         ax_accel.set_title('Accelerate')
