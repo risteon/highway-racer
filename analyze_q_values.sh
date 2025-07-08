@@ -199,11 +199,12 @@ else
     exit 1
 fi
 
-# Find the actual data directory (script creates run_name/checkpoint_name subdirs)
-ACTUAL_DATA_DIR=$(find "$DATA_DIR" -name "episode_0" -type d | head -1 | dirname)
+# With the fixed record script, data goes directly to DATA_DIR
+ACTUAL_DATA_DIR="$DATA_DIR"
 
-if [ -z "$ACTUAL_DATA_DIR" ]; then
-    log_error "Could not find recorded episode data"
+# Verify episode data exists
+if [ ! -d "$ACTUAL_DATA_DIR/episode_0" ]; then
+    log_error "Could not find recorded episode data in $ACTUAL_DATA_DIR"
     exit 1
 fi
 

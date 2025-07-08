@@ -187,13 +187,25 @@ def run_episode_with_q_recording(
         "observations": [],
         "actions_taken": [],
         "rewards": [],
+        # Speed control actions
         "q_logits_accelerate": [],
         "q_atoms_accelerate": [],
         "q_probs_accelerate": [],
         "q_logits_brake": [],
         "q_atoms_brake": [],
         "q_probs_brake": [],
-        "q_logits_policy": [],  # Q-values for the action actually taken
+        "q_logits_continue": [],  # No acceleration/braking
+        "q_atoms_continue": [],
+        "q_probs_continue": [],
+        # Steering actions
+        "q_logits_steer_right": [],
+        "q_atoms_steer_right": [],
+        "q_probs_steer_right": [],
+        "q_logits_steer_left": [],
+        "q_atoms_steer_left": [],
+        "q_probs_steer_left": [],
+        # Policy action (what agent actually chose)
+        "q_logits_policy": [],
         "q_atoms_policy": [],
         "q_probs_policy": [],
         "frames": [],
@@ -228,39 +240,30 @@ def run_episode_with_q_recording(
         
         episode_data["actions_taken"].append(action.copy())
         
-        # Define test actions: accelerate and brake
+        # Define test actions for comprehensive highway driving analysis
         # Highway-env action space: [steering, acceleration]
-        # Accelerate: [0.0, 1.0] (no steering, full acceleration)
-        # Brake: [0.0, -1.0] (no steering, full braking)
-        action_accelerate = jnp.array([[0.0, 1.0]])
-        action_brake = jnp.array([[0.0, -1.0]])
-        action_policy = action[None, :]  # Add batch dimension
+        test_actions = {
+            # Speed control actions
+            "accelerate": jnp.array([[0.0, 1.0]]),    # No steering, full acceleration
+            "brake": jnp.array([[0.0, -1.0]]),        # No steering, full braking
+            "continue": jnp.array([[0.0, 0.0]]),      # No steering, no acceleration
+            # Steering actions  
+            "steer_right": jnp.array([[1.0, 0.0]]),   # Full right steering, no acceleration
+            "steer_left": jnp.array([[-1.0, 0.0]]),   # Full left steering, no acceleration
+            # Policy action
+            "policy": action[None, :],                # Action actually taken by agent
+        }
         
         obs_batch = obs[None, :]  # Add batch dimension for critic evaluation
         
-        # Get Q-distributions for accelerate action
-        q_logits_acc, q_atoms_acc, q_probs_acc = get_q_distributions(
-            agent, obs_batch, action_accelerate
-        )
-        episode_data["q_logits_accelerate"].append(q_logits_acc)
-        episode_data["q_atoms_accelerate"].append(q_atoms_acc)
-        episode_data["q_probs_accelerate"].append(q_probs_acc)
-        
-        # Get Q-distributions for brake action
-        q_logits_brake, q_atoms_brake, q_probs_brake = get_q_distributions(
-            agent, obs_batch, action_brake
-        )
-        episode_data["q_logits_brake"].append(q_logits_brake)
-        episode_data["q_atoms_brake"].append(q_atoms_brake)
-        episode_data["q_probs_brake"].append(q_probs_brake)
-        
-        # Get Q-distributions for policy action (action actually taken)
-        q_logits_policy, q_atoms_policy, q_probs_policy = get_q_distributions(
-            agent, obs_batch, action_policy
-        )
-        episode_data["q_logits_policy"].append(q_logits_policy)
-        episode_data["q_atoms_policy"].append(q_atoms_policy)
-        episode_data["q_probs_policy"].append(q_probs_policy)
+        # Get Q-distributions for all test actions
+        for action_name, action_array in test_actions.items():
+            q_logits, q_atoms, q_probs = get_q_distributions(
+                agent, obs_batch, action_array
+            )
+            episode_data[f"q_logits_{action_name}"].append(q_logits)
+            episode_data[f"q_atoms_{action_name}"].append(q_atoms)
+            episode_data[f"q_probs_{action_name}"].append(q_probs)
         
         # Step environment
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -279,10 +282,20 @@ def run_episode_with_q_recording(
         if episode_data[key]:
             episode_data[key] = np.array(episode_data[key])
     
-    # Convert JAX arrays to numpy for Q-value data
-    for key in ["q_logits_accelerate", "q_atoms_accelerate", "q_probs_accelerate",
-                "q_logits_brake", "q_atoms_brake", "q_probs_brake",
-                "q_logits_policy", "q_atoms_policy", "q_probs_policy"]:
+    # Convert JAX arrays to numpy for Q-value data  
+    q_value_keys = [
+        # Speed control actions
+        "q_logits_accelerate", "q_atoms_accelerate", "q_probs_accelerate",
+        "q_logits_brake", "q_atoms_brake", "q_probs_brake",
+        "q_logits_continue", "q_atoms_continue", "q_probs_continue",
+        # Steering actions
+        "q_logits_steer_right", "q_atoms_steer_right", "q_probs_steer_right",
+        "q_logits_steer_left", "q_atoms_steer_left", "q_probs_steer_left",
+        # Policy action
+        "q_logits_policy", "q_atoms_policy", "q_probs_policy"
+    ]
+    
+    for key in q_value_keys:
         if episode_data[key]:
             episode_data[key] = np.array([np.array(x) for x in episode_data[key]])
     
@@ -305,15 +318,28 @@ def save_episode_data(episode_data, output_dir, episode_idx):
         "observations": episode_data["observations"],
         "actions_taken": episode_data["actions_taken"],
         "step_rewards": episode_data["step_rewards"],
+        # Speed control actions
         "q_logits_accelerate": episode_data["q_logits_accelerate"],
         "q_atoms_accelerate": episode_data["q_atoms_accelerate"],
         "q_probs_accelerate": episode_data["q_probs_accelerate"],
         "q_logits_brake": episode_data["q_logits_brake"],
         "q_atoms_brake": episode_data["q_atoms_brake"],
         "q_probs_brake": episode_data["q_probs_brake"],
+        "q_logits_continue": episode_data["q_logits_continue"],
+        "q_atoms_continue": episode_data["q_atoms_continue"],
+        "q_probs_continue": episode_data["q_probs_continue"],
+        # Steering actions
+        "q_logits_steer_right": episode_data["q_logits_steer_right"],
+        "q_atoms_steer_right": episode_data["q_atoms_steer_right"],
+        "q_probs_steer_right": episode_data["q_probs_steer_right"],
+        "q_logits_steer_left": episode_data["q_logits_steer_left"],
+        "q_atoms_steer_left": episode_data["q_atoms_steer_left"],
+        "q_probs_steer_left": episode_data["q_probs_steer_left"],
+        # Policy action
         "q_logits_policy": episode_data["q_logits_policy"],
         "q_atoms_policy": episode_data["q_atoms_policy"],
         "q_probs_policy": episode_data["q_probs_policy"],
+        # Environment data
         "frames": np.array(episode_data["frames"]) if episode_data["frames"] else np.array([]),
         "episode_return": episode_data["episode_return"],
         "episode_length": episode_data["episode_length"],
@@ -343,6 +369,9 @@ def save_episode_data(episode_data, output_dir, episode_idx):
         "q_value_shape": {
             "accelerate": episode_data["q_probs_accelerate"][0].shape if len(episode_data["q_probs_accelerate"]) > 0 else None,
             "brake": episode_data["q_probs_brake"][0].shape if len(episode_data["q_probs_brake"]) > 0 else None,
+            "continue": episode_data["q_probs_continue"][0].shape if len(episode_data["q_probs_continue"]) > 0 else None,
+            "steer_right": episode_data["q_probs_steer_right"][0].shape if len(episode_data["q_probs_steer_right"]) > 0 else None,
+            "steer_left": episode_data["q_probs_steer_left"][0].shape if len(episode_data["q_probs_steer_left"]) > 0 else None,
             "policy": episode_data["q_probs_policy"][0].shape if len(episode_data["q_probs_policy"]) > 0 else None,
         }
     }
@@ -398,19 +427,26 @@ def main(_):
         agent, policy_path
     )
 
-    # Auto-generate output folder based on run name and checkpoint name
-    checkpoint_name = os.path.basename(FLAGS.policy_file)
-    if not checkpoint_name:
-        checkpoint_name = "unknown_checkpoint"
+    # Check if output directory already contains run/checkpoint structure
+    # If so, use it directly; otherwise auto-generate subdirectories
+    if os.path.basename(FLAGS.output_dir) in ["data", "plots"]:
+        # bash script passes structured path like ./q_values/run/ckpt/data
+        auto_output_dir = FLAGS.output_dir
+        print(f"Using structured output directory: {auto_output_dir}")
+    else:
+        # Standalone usage - auto-generate output folder based on run name and checkpoint name
+        checkpoint_name = os.path.basename(FLAGS.policy_file)
+        if not checkpoint_name:
+            checkpoint_name = "unknown_checkpoint"
 
-    # Extract run name from policy path (parent directory of checkpoint)
-    run_name = os.path.basename(os.path.dirname(FLAGS.policy_file))
-    if not run_name:
-        run_name = "unknown_run"
+        # Extract run name from policy path (parent directory of checkpoint)
+        run_name = os.path.basename(os.path.dirname(FLAGS.policy_file))
+        if not run_name:
+            run_name = "unknown_run"
 
-    # Create output folder under specified directory
-    auto_output_dir = os.path.join(FLAGS.output_dir, run_name, checkpoint_name)
-    print(f"Output directory: {auto_output_dir}")
+        # Create output folder under specified directory
+        auto_output_dir = os.path.join(FLAGS.output_dir, run_name, checkpoint_name)
+        print(f"Auto-generated output directory: {auto_output_dir}")
 
     # Default highway environment configuration
     highway_config = {
@@ -457,7 +493,10 @@ def main(_):
         return
 
     print(f"\nRecording Q-value distributions over {FLAGS.num_episodes} episodes...")
-    print("Actions analyzed: Accelerate [0.0, 1.0], Brake [0.0, -1.0], Policy action")
+    print("Actions analyzed:")
+    print("  Speed Control: Accelerate [0.0, 1.0], Brake [0.0, -1.0], Continue [0.0, 0.0]")
+    print("  Steering: Steer Right [1.0, 0.0], Steer Left [-1.0, 0.0]")
+    print("  Policy: Action actually chosen by agent")
 
     # Run episodes and record Q-value data
     all_episodes_data = []
