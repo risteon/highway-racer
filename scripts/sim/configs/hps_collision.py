@@ -26,7 +26,8 @@ def get_config():
     # config.target_entropy = -2.0
     # works, but try lower now
     # config.target_entropy = 0.0
-    config.target_entropy = -0.5
+    # config.target_entropy = -0.5
+    config.target_entropy = -2.0
 
     config.critic_weight_decay = 1e-3
     config.critic_layer_norm = True
