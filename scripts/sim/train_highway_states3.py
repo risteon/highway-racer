@@ -76,7 +76,7 @@ flags.DEFINE_integer(
     "save_checkpoint_interval", 5000, "Steps between saving checkpoints."
 )
 flags.DEFINE_string("checkpoint_dir", "policies", "Directory to save checkpoints.")
-flags.DEFINE_integer("keep_checkpoints", 20, "Number of checkpoints to keep.")
+flags.DEFINE_integer("keep_checkpoints", 41, "Number of checkpoints to keep.")
 flags.DEFINE_integer("utd_ratio", 8, "Updates per data point")
 flags.DEFINE_integer(
     "reset_interval",
@@ -210,9 +210,13 @@ class AsyncEnvStepper:
         # IMPORTANT: For Q-value bootstrapping, only use terminations (not truncations)
         # - Terminated episodes: shouldn't bootstrap (mask=0.0) - true episode end
         # - Truncated episodes: should bootstrap (mask=1.0) - episode continues but time limit hit
-        dones = terminations | truncations  # Combined done flag for episode boundary detection
-        masks = 1.0 - terminations.astype(float)  # Only terminations prevent bootstrapping
-        
+        dones = (
+            terminations | truncations
+        )  # Combined done flag for episode boundary detection
+        masks = 1.0 - terminations.astype(
+            float
+        )  # Only terminations prevent bootstrapping
+
         if np.any(dones):
             # Handle `final_observation` in case of a truncation or termination
             real_next_observations = next_observations.copy()
