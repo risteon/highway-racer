@@ -446,6 +446,15 @@ def main(_):
         print("Make sure the data directory contains 'q_values_and_trajectory.npz'")
         return
     
+    # Use checkpoint CVaR value if available, otherwise fall back to command line flag
+    checkpoint_cvar = metadata.get("checkpoint_cvar_risk")
+    if checkpoint_cvar is not None:
+        actual_cvar_risk = checkpoint_cvar
+        print(f"Using CVaR risk from checkpoint: {actual_cvar_risk}")
+    else:
+        actual_cvar_risk = FLAGS.cvar_risk
+        print(f"Using CVaR risk from command line: {actual_cvar_risk} (checkpoint value not found)")
+    
     print(f"\nCreating visualizations in: {FLAGS.output_dir}")
     
     # Create static analysis plots
@@ -454,7 +463,7 @@ def main(_):
         create_static_analysis_plots(
             data, FLAGS.output_dir, 
             plot_every_n=FLAGS.plot_every_n_steps,
-            cvar_risk=FLAGS.cvar_risk
+            cvar_risk=actual_cvar_risk
         )
     
     # Create animated visualization

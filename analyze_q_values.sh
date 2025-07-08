@@ -228,7 +228,6 @@ if [ ! -z "$FIRST_EPISODE" ]; then
     python "$PLOT_SCRIPT" \
         --data_dir "$FIRST_EPISODE" \
         --output_dir "$PLOTS_DIR" \
-        --cvar_risk "$CVAR_RISK" \
         --create_animation=false \
         --save_static_plots=true
     
