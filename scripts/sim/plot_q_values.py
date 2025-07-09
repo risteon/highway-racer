@@ -157,62 +157,23 @@ def create_static_analysis_plots(data, output_dir, plot_every_n=5, cvar_risk=0.9
     # 1. Q-Value Evolution Over Time - Primary Actions (brake, accelerate, policy)
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     
-    # Expected Q-values (Top-left) with heatmap distribution background
-    def create_q_distribution_heatmap(ax, q_probs_data, q_atoms_data, episode_length):
-        """Create heatmap showing combined Q-value distribution over time"""
-        # Average over ensemble and squeeze batch dimension
-        q_probs_avg = np.mean(q_probs_data.squeeze(), axis=1)  # (T, N_atoms)
-        q_atoms_avg = np.mean(q_atoms_data.squeeze(), axis=1)  # (T, N_atoms)
-        
-        # Find global Q-value range across all timesteps
-        q_min = np.min(q_atoms_avg)
-        q_max = np.max(q_atoms_avg)
-        
-        # Create regular grid for interpolation
-        q_grid = np.linspace(q_min, q_max, 100)
-        probability_surface = np.zeros((len(q_grid), episode_length))
-        
-        # Interpolate categorical distribution to regular grid at each timestep
-        for t in range(episode_length):
-            atoms_t = q_atoms_avg[t]
-            probs_t = q_probs_avg[t]
-            
-            # Sort atoms and probs for proper interpolation
-            sort_idx = np.argsort(atoms_t)
-            atoms_sorted = atoms_t[sort_idx]
-            probs_sorted = probs_t[sort_idx]
-            
-            # Interpolate to regular grid (normalized probabilities)
-            probability_surface[:, t] = np.interp(q_grid, atoms_sorted, probs_sorted, left=0, right=0)
-        
-        # Create heatmap background
-        im = ax.imshow(probability_surface, extent=[0, episode_length, q_min, q_max], 
-                      aspect='auto', alpha=0.3, cmap='Greys', origin='lower')
-        
-        return q_min, q_max
-    
-    # Use accelerate action as background heatmap (most common action)
-    q_min_global, q_max_global = create_q_distribution_heatmap(axes[0, 0], data['q_probs_accelerate'], 
-                                                              data['q_atoms_accelerate'], episode_length)
-    
-    # Plot mean lines on top of heatmap
-    axes[0, 0].plot(stats_accel['ensemble_mean'], label='Accelerate', color=colors['accelerate'], linewidth=3)
-    axes[0, 0].plot(stats_brake['ensemble_mean'], label='Brake', color=colors['brake'], linewidth=3)
-    axes[0, 0].plot(stats_policy['ensemble_mean'], label='Policy Action', color=colors['policy'], linewidth=3)
-    
-    # Add std bands for better visibility
+    # Expected Q-values (Top-left)
+    axes[0, 0].plot(stats_accel['ensemble_mean'], label='Accelerate', color=colors['accelerate'], linewidth=2)
+    axes[0, 0].plot(stats_brake['ensemble_mean'], label='Brake', color=colors['brake'], linewidth=2)
+    axes[0, 0].plot(stats_policy['ensemble_mean'], label='Policy Action', color=colors['policy'], linewidth=2)
+    # Add std bands for all actions
     axes[0, 0].fill_between(range(len(stats_accel['ensemble_mean'])), 
                            stats_accel['ensemble_mean'] - stats_accel['ensemble_std'],
                            stats_accel['ensemble_mean'] + stats_accel['ensemble_std'], 
-                           alpha=0.2, color=colors['accelerate'])
+                           alpha=0.3, color=colors['accelerate'])
     axes[0, 0].fill_between(range(len(stats_brake['ensemble_mean'])), 
                            stats_brake['ensemble_mean'] - stats_brake['ensemble_std'],
                            stats_brake['ensemble_mean'] + stats_brake['ensemble_std'], 
-                           alpha=0.2, color=colors['brake'])
+                           alpha=0.3, color=colors['brake'])
     axes[0, 0].fill_between(range(len(stats_policy['ensemble_mean'])), 
                            stats_policy['ensemble_mean'] - stats_policy['ensemble_std'],
                            stats_policy['ensemble_mean'] + stats_policy['ensemble_std'], 
-                           alpha=0.2, color=colors['policy'])
+                           alpha=0.3, color=colors['policy'])
     axes[0, 0].set_xlabel('Time Step')
     axes[0, 0].set_ylabel('Expected Q-Value')
     axes[0, 0].set_title('Q-Value Evolution (Expected Value)')
