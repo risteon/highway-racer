@@ -34,6 +34,7 @@ flags.DEFINE_string("policy_file", None, "Path to the policy checkpoint director
 flags.DEFINE_string("output_dir", "./q_value_analysis", "Path to the output directory")
 flags.DEFINE_integer("num_episodes", 5, "Number of evaluation episodes")
 flags.DEFINE_integer("max_steps", 1000, "Maximum steps per episode")
+flags.DEFINE_integer("min_steps", 0, "Minimum steps per episode (retries until reached)")
 flags.DEFINE_integer("seed", 42, "Random seed")
 flags.DEFINE_boolean("render", True, "Enable video rendering and frame saving")
 flags.DEFINE_string("env_name", "highway-v0", "Highway environment name")
@@ -447,8 +448,8 @@ def main(_):
         "vehicles_count": FLAGS.num_vehicles,
         "duration": 40,
         "initial_spacing": 2,
-        "collision_reward": -1,
-        "reward_speed_range": [30, 45],
+        "collision_reward": -10,
+        "reward_speed_range": [10, 40],
         "simulation_frequency": 15,
         "policy_frequency": 5,
         "offroad_terminal": True,
@@ -551,18 +552,38 @@ def main(_):
     for episode in trange(FLAGS.num_episodes, desc="Recording episodes"):
         print(f"\nEpisode {episode + 1}/{FLAGS.num_episodes}")
 
-        # Run episode with Q-value recording
-        episode_data = run_episode_with_q_recording(
-            agent, env, max_steps=FLAGS.max_steps, render_frames=FLAGS.render
-        )
+        # Retry until we get an episode with at least min_steps
+        retry_count = 0
+        max_retries = 50  # Prevent infinite loops
+        
+        while retry_count <= max_retries:
+            # Run episode with Q-value recording
+            episode_data = run_episode_with_q_recording(
+                agent, env, max_steps=FLAGS.max_steps, render_frames=FLAGS.render
+            )
+            
+            episode_length = episode_data['episode_length']
+            
+            # Check if episode meets minimum length requirement
+            if episode_length >= FLAGS.min_steps:
+                print(f"  Episode return: {episode_data['episode_return']:.2f}")
+                print(f"  Episode length: {episode_length}")
+                if retry_count > 0:
+                    print(f"  Accepted after {retry_count + 1} attempts")
+                break
+            else:
+                retry_count += 1
+                if FLAGS.min_steps > 0:
+                    print(f"  Attempt {retry_count}: Episode too short ({episode_length} < {FLAGS.min_steps} steps), retrying...")
+        
+        if retry_count > max_retries:
+            print(f"  Warning: Could not achieve {FLAGS.min_steps} steps after {max_retries + 1} attempts")
+            print(f"  Using episode with {episode_length} steps")
 
         all_episodes_data.append(episode_data)
 
         # Save episode data
         save_episode_data(episode_data, auto_output_dir, episode, checkpoint_config)
-
-        print(f"  Episode return: {episode_data['episode_return']:.2f}")
-        print(f"  Episode length: {episode_data['episode_length']}")
 
     # Save aggregate analysis data
     aggregate_data = {

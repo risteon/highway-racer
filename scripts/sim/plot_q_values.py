@@ -144,9 +144,6 @@ def create_static_analysis_plots(data, output_dir, plot_every_n=5, cvar_risk=0.9
     stats_steer_left = compute_q_statistics(data['q_probs_steer_left'], data['q_atoms_steer_left'], cvar_risk)
     stats_policy = compute_q_statistics(data['q_probs_policy'], data['q_atoms_policy'], cvar_risk)
     
-    # 1. Q-Value Evolution Over Time (2x2 grid with all 6 actions)
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    
     # Colors for each action
     colors = {
         'accelerate': 'blue',
@@ -157,17 +154,26 @@ def create_static_analysis_plots(data, output_dir, plot_every_n=5, cvar_risk=0.9
         'policy': 'brown'
     }
     
+    # 1. Q-Value Evolution Over Time - Primary Actions (brake, accelerate, policy)
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
     # Expected Q-values (Top-left)
     axes[0, 0].plot(stats_accel['ensemble_mean'], label='Accelerate', color=colors['accelerate'], linewidth=2)
     axes[0, 0].plot(stats_brake['ensemble_mean'], label='Brake', color=colors['brake'], linewidth=2)
-    axes[0, 0].plot(stats_continue['ensemble_mean'], label='Continue', color=colors['continue'], linewidth=2)
-    axes[0, 0].plot(stats_steer_right['ensemble_mean'], label='Steer Right', color=colors['steer_right'], linewidth=2)
-    axes[0, 0].plot(stats_steer_left['ensemble_mean'], label='Steer Left', color=colors['steer_left'], linewidth=2)
     axes[0, 0].plot(stats_policy['ensemble_mean'], label='Policy Action', color=colors['policy'], linewidth=2)
+    # Add std bands for all actions
     axes[0, 0].fill_between(range(len(stats_accel['ensemble_mean'])), 
                            stats_accel['ensemble_mean'] - stats_accel['ensemble_std'],
                            stats_accel['ensemble_mean'] + stats_accel['ensemble_std'], 
                            alpha=0.3, color=colors['accelerate'])
+    axes[0, 0].fill_between(range(len(stats_brake['ensemble_mean'])), 
+                           stats_brake['ensemble_mean'] - stats_brake['ensemble_std'],
+                           stats_brake['ensemble_mean'] + stats_brake['ensemble_std'], 
+                           alpha=0.3, color=colors['brake'])
+    axes[0, 0].fill_between(range(len(stats_policy['ensemble_mean'])), 
+                           stats_policy['ensemble_mean'] - stats_policy['ensemble_std'],
+                           stats_policy['ensemble_mean'] + stats_policy['ensemble_std'], 
+                           alpha=0.3, color=colors['policy'])
     axes[0, 0].set_xlabel('Time Step')
     axes[0, 0].set_ylabel('Expected Q-Value')
     axes[0, 0].set_title('Q-Value Evolution (Expected Value)')
@@ -177,9 +183,6 @@ def create_static_analysis_plots(data, output_dir, plot_every_n=5, cvar_risk=0.9
     # CVaR Q-values (Risk-Sensitive) (Top-right)
     axes[0, 1].plot(np.mean(stats_accel['cvar'], axis=-1), label=f'Accelerate', color=colors['accelerate'], linewidth=2)
     axes[0, 1].plot(np.mean(stats_brake['cvar'], axis=-1), label=f'Brake', color=colors['brake'], linewidth=2)
-    axes[0, 1].plot(np.mean(stats_continue['cvar'], axis=-1), label=f'Continue', color=colors['continue'], linewidth=2)
-    axes[0, 1].plot(np.mean(stats_steer_right['cvar'], axis=-1), label=f'Steer Right', color=colors['steer_right'], linewidth=2)
-    axes[0, 1].plot(np.mean(stats_steer_left['cvar'], axis=-1), label=f'Steer Left', color=colors['steer_left'], linewidth=2)
     axes[0, 1].plot(np.mean(stats_policy['cvar'], axis=-1), label=f'Policy Action', color=colors['policy'], linewidth=2)
     axes[0, 1].set_xlabel('Time Step')
     axes[0, 1].set_ylabel('CVaR Q-Value')
@@ -190,9 +193,6 @@ def create_static_analysis_plots(data, output_dir, plot_every_n=5, cvar_risk=0.9
     # Q-Value Uncertainty (Aleatoric) (Bottom-left)
     axes[1, 0].plot(stats_accel['aleatoric_mean'], label='Accelerate', color=colors['accelerate'], linewidth=2)
     axes[1, 0].plot(stats_brake['aleatoric_mean'], label='Brake', color=colors['brake'], linewidth=2)
-    axes[1, 0].plot(stats_continue['aleatoric_mean'], label='Continue', color=colors['continue'], linewidth=2)
-    axes[1, 0].plot(stats_steer_right['aleatoric_mean'], label='Steer Right', color=colors['steer_right'], linewidth=2)
-    axes[1, 0].plot(stats_steer_left['aleatoric_mean'], label='Steer Left', color=colors['steer_left'], linewidth=2)
     axes[1, 0].plot(stats_policy['aleatoric_mean'], label='Policy Action', color=colors['policy'], linewidth=2)
     axes[1, 0].set_xlabel('Time Step')
     axes[1, 0].set_ylabel('Q-Value Std Dev')
@@ -203,9 +203,6 @@ def create_static_analysis_plots(data, output_dir, plot_every_n=5, cvar_risk=0.9
     # Epistemic Uncertainty (Ensemble Disagreement) (Bottom-right)
     axes[1, 1].plot(stats_accel['ensemble_std'], label='Accelerate', color=colors['accelerate'], linewidth=2)
     axes[1, 1].plot(stats_brake['ensemble_std'], label='Brake', color=colors['brake'], linewidth=2)
-    axes[1, 1].plot(stats_continue['ensemble_std'], label='Continue', color=colors['continue'], linewidth=2)
-    axes[1, 1].plot(stats_steer_right['ensemble_std'], label='Steer Right', color=colors['steer_right'], linewidth=2)
-    axes[1, 1].plot(stats_steer_left['ensemble_std'], label='Steer Left', color=colors['steer_left'], linewidth=2)
     axes[1, 1].plot(stats_policy['ensemble_std'], label='Policy Action', color=colors['policy'], linewidth=2)
     axes[1, 1].set_xlabel('Time Step')
     axes[1, 1].set_ylabel('Ensemble Std Dev')
@@ -214,7 +211,67 @@ def create_static_analysis_plots(data, output_dir, plot_every_n=5, cvar_risk=0.9
     axes[1, 1].grid(True)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'q_value_evolution.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, 'q_value_evolution_primary.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 2. Q-Value Evolution Over Time - Steering Actions (continue, steer_left, steer_right)
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # Expected Q-values (Top-left)
+    axes[0, 0].plot(stats_continue['ensemble_mean'], label='Continue', color=colors['continue'], linewidth=2)
+    axes[0, 0].plot(stats_steer_left['ensemble_mean'], label='Steer Left', color=colors['steer_left'], linewidth=2)
+    axes[0, 0].plot(stats_steer_right['ensemble_mean'], label='Steer Right', color=colors['steer_right'], linewidth=2)
+    # Add std bands for all actions
+    axes[0, 0].fill_between(range(len(stats_continue['ensemble_mean'])), 
+                           stats_continue['ensemble_mean'] - stats_continue['ensemble_std'],
+                           stats_continue['ensemble_mean'] + stats_continue['ensemble_std'], 
+                           alpha=0.3, color=colors['continue'])
+    axes[0, 0].fill_between(range(len(stats_steer_left['ensemble_mean'])), 
+                           stats_steer_left['ensemble_mean'] - stats_steer_left['ensemble_std'],
+                           stats_steer_left['ensemble_mean'] + stats_steer_left['ensemble_std'], 
+                           alpha=0.3, color=colors['steer_left'])
+    axes[0, 0].fill_between(range(len(stats_steer_right['ensemble_mean'])), 
+                           stats_steer_right['ensemble_mean'] - stats_steer_right['ensemble_std'],
+                           stats_steer_right['ensemble_mean'] + stats_steer_right['ensemble_std'], 
+                           alpha=0.3, color=colors['steer_right'])
+    axes[0, 0].set_xlabel('Time Step')
+    axes[0, 0].set_ylabel('Expected Q-Value')
+    axes[0, 0].set_title('Q-Value Evolution - Steering Actions (Expected Value)')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True)
+    
+    # CVaR Q-values (Risk-Sensitive) (Top-right)
+    axes[0, 1].plot(np.mean(stats_continue['cvar'], axis=-1), label=f'Continue', color=colors['continue'], linewidth=2)
+    axes[0, 1].plot(np.mean(stats_steer_left['cvar'], axis=-1), label=f'Steer Left', color=colors['steer_left'], linewidth=2)
+    axes[0, 1].plot(np.mean(stats_steer_right['cvar'], axis=-1), label=f'Steer Right', color=colors['steer_right'], linewidth=2)
+    axes[0, 1].set_xlabel('Time Step')
+    axes[0, 1].set_ylabel('CVaR Q-Value')
+    axes[0, 1].set_title(f'Risk-Sensitive Q-Values - Steering (CVaR α={cvar_risk})')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True)
+    
+    # Q-Value Uncertainty (Aleatoric) (Bottom-left)
+    axes[1, 0].plot(stats_continue['aleatoric_mean'], label='Continue', color=colors['continue'], linewidth=2)
+    axes[1, 0].plot(stats_steer_left['aleatoric_mean'], label='Steer Left', color=colors['steer_left'], linewidth=2)
+    axes[1, 0].plot(stats_steer_right['aleatoric_mean'], label='Steer Right', color=colors['steer_right'], linewidth=2)
+    axes[1, 0].set_xlabel('Time Step')
+    axes[1, 0].set_ylabel('Q-Value Std Dev')
+    axes[1, 0].set_title('Aleatoric Uncertainty - Steering (Distribution Width)')
+    axes[1, 0].legend()
+    axes[1, 0].grid(True)
+    
+    # Epistemic Uncertainty (Ensemble Disagreement) (Bottom-right)
+    axes[1, 1].plot(stats_continue['ensemble_std'], label='Continue', color=colors['continue'], linewidth=2)
+    axes[1, 1].plot(stats_steer_left['ensemble_std'], label='Steer Left', color=colors['steer_left'], linewidth=2)
+    axes[1, 1].plot(stats_steer_right['ensemble_std'], label='Steer Right', color=colors['steer_right'], linewidth=2)
+    axes[1, 1].set_xlabel('Time Step')
+    axes[1, 1].set_ylabel('Ensemble Std Dev')
+    axes[1, 1].set_title('Epistemic Uncertainty - Steering (Ensemble Disagreement)')
+    axes[1, 1].legend()
+    axes[1, 1].grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'q_value_evolution_steering.png'), dpi=300, bbox_inches='tight')
     plt.close()
     
     # 2. Q-Distribution Heatmaps for Selected Steps (Extended for 6 actions)

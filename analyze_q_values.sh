@@ -5,17 +5,18 @@
 # This script automates the extraction and visualization of Q-value distributions
 # from trained RACER (Distributional SAC) policies on highway environments.
 #
-# Usage: ./analyze_q_values.sh <checkpoint_path> <config_path> [num_episodes] [max_steps]
+# Usage: ./analyze_q_values.sh <checkpoint_path> <config_path> [num_episodes] [max_steps] [min_steps]
 #
 # Arguments:
 #   checkpoint_path : Path to policy checkpoint directory (required)
 #   config_path     : Path to training config file (required)  
 #   num_episodes    : Number of episodes to analyze (optional, default: 3)
 #   max_steps       : Maximum steps per episode (optional, default: 300)
+#   min_steps       : Minimum steps per episode - retries until reached (optional, default: 0)
 #
 # Example:
 #   ./analyze_q_values.sh policies/glorious-sea-116/checkpoint_500000 scripts/sim/configs/hpd_collision.py
-#   ./analyze_q_values.sh policies/run-42/checkpoint_100000 configs/my_config.py 5 500
+#   ./analyze_q_values.sh policies/run-42/checkpoint_100000 configs/my_config.py 5 500 100
 #
 # Output Structure:
 #   ./q_values/<run_name>/<checkpoint_name>/
@@ -60,17 +61,18 @@ log_error() {
 show_help() {
     echo "Q-Value Analysis Pipeline for RACER"
     echo ""
-    echo "Usage: $0 <checkpoint_path> <config_path> [num_episodes] [max_steps]"
+    echo "Usage: $0 <checkpoint_path> <config_path> [num_episodes] [max_steps] [min_steps]"
     echo ""
     echo "Arguments:"
     echo "  checkpoint_path   Path to policy checkpoint directory (required)"
     echo "  config_path       Path to training config file (required)"
     echo "  num_episodes      Number of episodes to analyze (default: 3)"
     echo "  max_steps         Maximum steps per episode (default: 300)"
+    echo "  min_steps         Minimum steps per episode - retries until reached (default: 0)"
     echo ""
     echo "Examples:"
     echo "  $0 policies/glorious-sea-116/checkpoint_500000 scripts/sim/configs/hpd_collision.py"
-    echo "  $0 policies/run-42/checkpoint_100000 configs/my_config.py 5 500"
+    echo "  $0 policies/run-42/checkpoint_100000 configs/my_config.py 5 500 100"
     echo ""
     echo "Output will be saved to: ./q_values/<run_name>/<checkpoint_name>/"
 }
@@ -92,11 +94,12 @@ CHECKPOINT_PATH="$1"
 CONFIG_PATH="$2"
 NUM_EPISODES="${3:-3}"  # Default to 3 episodes
 MAX_STEPS="${4:-300}"   # Default to 300 steps
+MIN_STEPS="${5:-0}"     # Default to 0 (no minimum)
 
 log_info "Starting Q-value analysis pipeline"
 log_info "Checkpoint: $CHECKPOINT_PATH"
 log_info "Config: $CONFIG_PATH"
-log_info "Episodes: $NUM_EPISODES, Max steps: $MAX_STEPS"
+log_info "Episodes: $NUM_EPISODES, Max steps: $MAX_STEPS, Min steps: $MIN_STEPS"
 
 # Validate checkpoint path
 if [ ! -d "$CHECKPOINT_PATH" ]; then
@@ -182,13 +185,18 @@ log_success "Environment setup complete"
 
 # Phase 1: Q-value recording
 log_info "Phase 1: Recording Q-value distributions..."
-log_info "This will analyze $NUM_EPISODES episodes with up to $MAX_STEPS steps each"
+if [ "$MIN_STEPS" -gt 0 ]; then
+    log_info "This will analyze $NUM_EPISODES episodes with $MIN_STEPS-$MAX_STEPS steps each (retrying until min length reached)"
+else
+    log_info "This will analyze $NUM_EPISODES episodes with up to $MAX_STEPS steps each"
+fi
 
 WANDB_MODE=disabled python "$RECORD_SCRIPT" \
     --policy_file "$CHECKPOINT_PATH" \
     --config "$CONFIG_PATH" \
     --num_episodes "$NUM_EPISODES" \
     --max_steps "$MAX_STEPS" \
+    --min_steps "$MIN_STEPS" \
     --output_dir "$DATA_DIR" \
     --render=true
 
