@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "racer"
+version = "0.1.0"
+description = "Racer RL project"
+authors = [
+    { name = "Your Name", email = "your@email.com" }
+]
+dependencies = [
+    # Add your runtime dependencies here, e.g. "numpy", "jax", etc.
+]
+
+[project.optional-dependencies]
+dev = [
+    # Add your development dependencies here, e.g. "pytest", "black"
+]

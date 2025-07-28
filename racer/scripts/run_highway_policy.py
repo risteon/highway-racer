@@ -23,9 +23,10 @@ from jaxrl5.agents import (
     DistributionalSACLearner,
 )
 
-jax.config.update("jax_platform_name", "cpu")
-
-warnings.filterwarnings("ignore")
+from highway_trajectory_utils import (
+    run_highway_trajectory,
+    LearnedPolicyAgent,
+)
 
 FLAGS = flags.FLAGS
 
@@ -46,22 +47,6 @@ config_flags.DEFINE_config_file(
     "configs/highway_distributional_config.py",
     "File path to the training hyperparameter configuration.",
     lock_config=False,
-)
-
-
-# Import shared safety functions
-from highway_safety_utils import (
-    safety_reward_fn,
-    is_vehicle_offroad,
-    debug_vehicle_position,
-    calculate_forward_speed_reward,
-    calculate_training_reward,
-)
-
-# Import shared trajectory utilities
-from highway_trajectory_utils import (
-    run_highway_trajectory,
-    LearnedPolicyAgent,
 )
 
 

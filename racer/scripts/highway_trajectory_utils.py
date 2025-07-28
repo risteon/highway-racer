@@ -11,14 +11,6 @@ from PIL import Image, ImageDraw
 from moviepy.editor import ImageSequenceClip
 from abc import ABC, abstractmethod
 
-# Import shared safety functions
-from highway_safety_utils import (
-    safety_reward_fn,
-    is_vehicle_offroad,
-    debug_vehicle_position,
-    calculate_training_reward,
-)
-
 
 class AgentInterface(ABC):
     """Abstract interface for agents that can be used in trajectory analysis."""
@@ -120,7 +112,6 @@ def run_highway_trajectory(
         print("-" * 100)
 
     # Initialize reward components for first frame
-    last_env_reward = 0.0
     last_reward_components = {
         "speed_reward": 0.0,
         "collision_reward": 0.0,
@@ -149,7 +140,6 @@ def run_highway_trajectory(
                     ego_speed = np.linalg.norm(ego_vehicle[3:5])  # vx, vy
 
                     # Calculate safety metrics for overlay
-                    safety_reward = safety_reward_fn(obs, env)
                     is_offroad = is_vehicle_offroad(env)
 
                     # Grid layout parameters
@@ -215,20 +205,7 @@ def run_highway_trajectory(
         if info["rewards"]["on_road_reward"] == 0.0:
             env_reward -= 5.0
 
-        # Store info for next frame's overlay
-        last_env_reward = env_reward
         last_info = info
-
-        # Calculate training reward using shared function
-        # training_reward, reward_components = calculate_training_reward(
-        #     env,
-        #     env_reward,
-        #     info,
-        #     safety_bonus_coeff,
-        #     reward_speed_range=highway_config.get("reward_speed_range", [20, 50]),
-        #     next_obs=next_obs,
-        # )
-        # safety_reward = reward_components["safety_reward"]
 
         # Store reward components for next frame's overlay
         last_reward_components = info["rewards"]
