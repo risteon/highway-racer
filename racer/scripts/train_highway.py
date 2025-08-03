@@ -1,28 +1,22 @@
 #! /usr/bin/env python
+from dataclasses import dataclass, field
 import importlib.util
 import os
+from pathlib import Path
 import pickle
 from typing import Tuple
-import gymnasium as gym
-import highway_env  # This registers highway environments
-from gymnasium.wrappers import (
-    TimeLimit,
-    RecordEpisodeStatistics,
-    FlattenObservation,
-    RecordVideo,
-)
-from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
+
 import numpy as np
-
-
 import tqdm
 import wandb
-from dataclasses import dataclass, field
 import tyro
 
 from jax import numpy as jnp
 from jaxrl5.agents import *
 from jaxrl5.data import ReplayBuffer
+
+from ..trainer.env import EnvPair, make_env
+from ..trainer.async_env_stepper import AsyncEnvStepper
 
 
 @dataclass
@@ -86,52 +80,13 @@ class Args:
     reset_ensemble: bool = field(
         default=False, metadata={"help": "Reset one ensemble member at a time"}
     )
-    group_name_suffix: str = field(default="", metadata={"help": "Group name suffix"})
     num_envs: int = field(
         default=8, metadata={"help": "Number of parallel environments"}
     )
     config: str = field(
-        default="configs/highway_sac_config.py",
+        default="distributional_sac_cvar.py",
         metadata={"help": "File path to the training hyperparameter configuration."},
     )
-
-
-highway_config = {
-    "observation": {
-        "type": "Kinematics",
-        "vehicles_count": 8,
-        "features": ["presence", "x", "y", "vx", "vy", "heading"],
-        "normalize": False,
-    },
-    "action": {"type": "ContinuousAction"},
-    "lanes_count": 4,
-    "vehicles_count": 10,
-    "vehicles_density": 0.75,
-    "duration": 40,  # seconds
-    "initial_spacing": 2,
-    "collision_reward": -10.0,
-    "right_lane_reward": 0.1,
-    "high_speed_reward": 0.5,
-    "lane_change_reward": 0.0,
-    "reward_speed_range": [10, 40],
-    "simulation_frequency": 15,
-    "policy_frequency": 5,
-    "normalize_reward": False,
-    "offroad_terminal": True,
-}
-
-
-def make_env(env_name, highway_config, seed, idx, **kwargs):
-    """Create a single environment for vectorization."""
-
-    def thunk():
-        env = gym.make(env_name, config=highway_config, **kwargs)
-        env = RecordEpisodeStatistics(env)
-        env = FlattenObservation(env)
-        env.action_space.seed(seed + idx)
-        return env
-
-    return thunk
 
 
 def run_trajectory(
@@ -199,52 +154,26 @@ def evaluate(
 
 def main(args: Args):
 
-    # Create vectorized environments. 2 independent sets to run asynchronously
-    envsA = AsyncVectorEnv(
-        [
-            make_env(args.env_name, highway_config, args.seed, i)
-            for i in range(0, args.num_envs)
-        ],
-        autoreset_mode="SameStep",
-    )
-    envsB = AsyncVectorEnv(
-        [
-            make_env(args.env_name, highway_config, args.seed, i)
-            for i in range(args.num_envs, args.num_envs * 2)
-        ],
-        autoreset_mode="SameStep",
-    )
-
-    # Create single evaluation environment
+    envs = EnvPair(args.env_name, args.seed, args.num_envs)
     eval_env = make_env(
-        args.env_name,
-        highway_config,
-        args.seed,
-        idx=args.num_envs * 2,
-        render_mode="rgb_array",
+        args.env_name, args.seed, idx=args.num_envs * 2, render_mode="rgb_array"
     )()
 
-    spec = importlib.util.spec_from_file_location("config", args.config)
+    spec = importlib.util.spec_from_file_location(
+        "config", Path("racer") / "configs" / args.config
+    )
     config_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config_module)
     config = config_module.get_config()
-    kwargs = dict(config)
-    model_cls = kwargs.pop("model_cls")
-    kwargs.pop("group_name", None)
 
-    # use full vectorized obs space
-    agent = globals()[model_cls].create(
-        args.seed, envsA.observation_space, envsA.action_space, **kwargs
+    agent = globals()[config.model_cls].create(
+        args.seed, envs.first.observation_space, envs.first.action_space, **config
     )
 
-    wandb_group_name = f"{kwargs['config'].group_name}"
-
-    replay_buffer_size = args.replay_buffer_size
-
     replay_buffer = ReplayBuffer(
-        envsA.single_observation_space,
-        envsA.single_action_space,
-        replay_buffer_size,
+        envs.first.single_observation_space,
+        envs.first.single_action_space,
+        args.replay_buffer_size,
     )
     replay_buffer.seed(args.seed)
     replay_buffer_iterator = replay_buffer.get_iterator(
@@ -253,15 +182,7 @@ def main(args: Args):
         }
     )
 
-    wandb.init(
-        project=args.wandb_project,
-        notes=args.comment,
-        group=(
-            f"{wandb_group_name}-highway"
-            if args.group_name_suffix is None
-            else f"{wandb_group_name}-{args.group_name_suffix}-highway"
-        ),
-    )
+    wandb.init(project=args.wandb_project, notes=args.comment, group=config.group_name)
     config_for_wandb = {
         **args.__dict__,
         "config": dict(args.config),
@@ -272,8 +193,8 @@ def main(args: Args):
     if args.reset_ensemble:
         reset_interval = reset_interval // agent.num_qs
 
-    action_min: np.ndarray = envsA.single_action_space.low
-    action_max: np.ndarray = envsA.single_action_space.high
+    action_min: np.ndarray = envs.first.single_action_space.low
+    action_max: np.ndarray = envs.first.single_action_space.high
 
     pbar = tqdm.tqdm(
         range(1, args.max_steps + 1),
@@ -284,10 +205,7 @@ def main(args: Args):
 
     # Create async environment stepper
     async_stepper = AsyncEnvStepper(
-        (envsA, envsB),
-        replay_buffer,
-        log_interval=args.log_interval,
-        seed=args.seed,
+        envs, replay_buffer, log_interval=args.log_interval, seed=args.seed
     )
     async_stepper.start()
     observations, index = async_stepper.get_results(timeout=None)
@@ -297,7 +215,7 @@ def main(args: Args):
             output_range = (action_min, action_max)
 
             if i < args.start_training:
-                actions = envsA.action_space.sample()
+                actions = envs.first.action_space.sample()
             else:
                 # Sample actions from agent using current observations
                 actions, agent = agent.sample_actions(
@@ -493,8 +411,7 @@ def main(args: Args):
         with open(os.path.join(args.save_dir, "final_buffer.pkl"), "wb") as f:
             pickle.dump(replay_buffer, f)
 
-    envsA.close()
-    envsB.close()
+    envs.close()
 
 
 if __name__ == "__main__":
