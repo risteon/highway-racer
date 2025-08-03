@@ -96,7 +96,9 @@ def _sample_actions(
 ) -> Tuple[jax.Array, jax.Array]:
     key, rng = jax.random.split(rng)
     dist = actor_apply_fn({"params": actor_params}, observations, **kwargs)
-    dist: distrax.Distribution = limits_apply_fn({"params": limits_params}, dist, output_range=output_range)
+    dist: distrax.Distribution = limits_apply_fn(
+        {"params": limits_params}, dist, output_range=output_range
+    )
     return dist.sample(seed=key), rng
 
 
@@ -396,7 +398,9 @@ def update_distributional_limits(
         action_distribution = actor.apply_fn(
             {"params": actor.params}, batch["observations"]
         )
-        action_distribution = limits.apply_fn({"params": params}, action_distribution, output_range=output_range)
+        action_distribution = limits.apply_fn(
+            {"params": params}, action_distribution, output_range=output_range
+        )
 
         rng, key = jax.random.split(rng)
         actions, log_probs = action_distribution.sample_and_log_prob(seed=rng)
@@ -446,9 +450,9 @@ class DistributionalSACLearner(Agent):
     )  # See M in RedQ https://arxiv.org/abs/2101.05982
     independent_ensemble: bool = struct.field(pytree_node=False)
     backup_entropy: bool = struct.field(pytree_node=False)
-    initialize_params: Callable[
-        [jax.Array], Dict[str, TrainState]
-    ] = struct.field(pytree_node=False)
+    initialize_params: Callable[[jax.Array], Dict[str, TrainState]] = struct.field(
+        pytree_node=False
+    )
 
     num_atoms: int = struct.field(pytree_node=False)
     q_min: float = struct.field(pytree_node=False)
@@ -499,6 +503,7 @@ class DistributionalSACLearner(Agent):
         pointnet_reduce_fn: str = "max",
         pointnet_use_layer_norm: bool = False,
         pointnet_dropout_rate: Optional[float] = None,
+        **_unused_kwargs,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1812.05905
@@ -534,7 +539,7 @@ class DistributionalSACLearner(Agent):
             actor_base_cls = partial(
                 MLP, hidden_dims=actor_hidden_dims, activate_final=True
             )
-        
+
         actor_cls = partial(Normal, base_cls=actor_base_cls, action_dim=action_dim)
         actor_def = actor_cls()
 
@@ -763,7 +768,9 @@ class DistributionalSACLearner(Agent):
         return self.replace(q_entropy_lagrange=q_entropy_lagrange), temp_info
 
     def update_limits(
-        self, batch: DatasetDict, output_range: Optional[Tuple[jax.Array, jax.Array]] = None
+        self,
+        batch: DatasetDict,
+        output_range: Optional[Tuple[jax.Array, jax.Array]] = None,
     ) -> Tuple["DistributionalSACLearner", Dict[str, float]]:
         rng, key = jax.random.split(self.rng)
         temperature = self.temp.apply_fn({"params": self.temp.params})
@@ -822,8 +829,12 @@ class DistributionalSACLearner(Agent):
         new_agent = self
         for i in range(utd_ratio):
             mini_batch = jax.tree_util.tree_map(partial(slice, i), batch)
-            mini_batch_output_range = jax.tree_util.tree_map(partial(slice, i), output_range)
-            mini_batch_output_range_next = jax.tree_util.tree_map(partial(slice, i), output_range_next)
+            mini_batch_output_range = jax.tree_util.tree_map(
+                partial(slice, i), output_range
+            )
+            mini_batch_output_range_next = jax.tree_util.tree_map(
+                partial(slice, i), output_range_next
+            )
             new_agent, critic_info = new_agent.update_critic(
                 mini_batch, output_range_next=mini_batch_output_range_next
             )
@@ -838,7 +849,9 @@ class DistributionalSACLearner(Agent):
             temp_info = {}
 
         if self.do_update_limits:
-            new_agent, limits_info = new_agent.update_limits(mini_batch, output_range=mini_batch_output_range)
+            new_agent, limits_info = new_agent.update_limits(
+                mini_batch, output_range=mini_batch_output_range
+            )
         else:
             limits_info = {}
 
