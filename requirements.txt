@@ -11,10 +11,6 @@ cycler==0.12.1
 Cython==0.29.37
 decorator==4.4.2
 distrax==0.1.5
-dm-env==1.6
-dm-tree==0.1.9
-dm_control==1.0.31
--e git+https://github.com/kylestach/epistemic-rl-release.git@3afa9bc2f6c43301186a333b4819d3938a3c94b6#egg=dmcgym&subdirectory=dmcgym
 etils==1.12.2
 Farama-Notifications==0.0.4
 flax==0.10.6
@@ -37,7 +33,6 @@ jax==0.6.2
 jax-cuda12-pjrt==0.6.2
 jax-cuda12-plugin==0.6.2
 jaxlib==0.6.2
--e git+https://github.com/kylestach/epistemic-rl-release.git@3afa9bc2f6c43301186a333b4819d3938a3c94b6#egg=jaxrl5&subdirectory=jaxrl5
 kiwisolver==1.4.8
 labmaze==1.0.6
 lxml==5.4.0
@@ -72,7 +67,6 @@ packaging==25.0
 pandas==2.3.0
 pillow==11.2.1
 platformdirs==4.3.8
--e git+https://github.com/kylestach/epistemic-rl-release.git@3afa9bc2f6c43301186a333b4819d3938a3c94b6#egg=procedural_driving&subdirectory=offroad-procedural-sim
 proglog==0.1.12
 protobuf==6.31.1
 psutil==7.0.0
