@@ -51,6 +51,14 @@ class EnvPair:
         self.first.close()
         self.second.close()
 
+    def __getitem__(self, index):
+        if index == 0:
+            return self.first
+        elif index == 1:
+            return self.second
+        else:
+            raise IndexError("Invalid environment index")
+
 
 def make_env(env_name, seed, idx, **kwargs):
     """Create a single environment for vectorization."""

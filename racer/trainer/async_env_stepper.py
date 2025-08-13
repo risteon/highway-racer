@@ -1,6 +1,9 @@
 import queue
 import threading
 
+import numpy as np
+import wandb
+
 
 class AsyncEnvStepper:
     """Handles asynchronous environment stepping with action queue.
@@ -9,7 +12,6 @@ class AsyncEnvStepper:
     """
 
     def __init__(self, envs, replay_buffer, log_interval, seed):
-
         # tuple (envsA, envsB) for vectorized environments
         self.envs = envs
         self.replay_buffer = replay_buffer
@@ -64,11 +66,11 @@ class AsyncEnvStepper:
     def _env_step_worker(self):
         """Worker thread that processes environment steps."""
         # start with initial resets for both envs
-        self.current_observations[0], self.current_infos[0] = self.envs[0].reset(
+        self.current_observations[0], self.current_infos[0] = self.envs.first.reset(
             seed=self.seed
         )
         self.result_queue.put((self.current_observations[0], 0))
-        self.current_observations[1], self.current_infos[1] = self.envs[1].reset(
+        self.current_observations[1], self.current_infos[1] = self.envs.second.reset(
             seed=self.seed
         )
         self.result_queue.put((self.current_observations[1], 1))
@@ -169,7 +171,6 @@ class AsyncEnvStepper:
 
         # Add experiences to replay buffer
         for env_idx in range(self.envs[index].num_envs):
-
             done = dones[env_idx]
 
             self.replay_buffer.insert(

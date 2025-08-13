@@ -3,9 +3,9 @@ from dataclasses import dataclass, field
 import importlib.util
 import os
 from pathlib import Path
-import pickle
 from typing import Tuple
 
+from flax.training import checkpoints
 import numpy as np
 import tqdm
 import wandb
@@ -153,7 +153,6 @@ def evaluate(
 
 
 def main(args: Args):
-
     envs = EnvPair(args.env_name, args.seed, args.num_envs)
     eval_env = make_env(
         args.env_name, args.seed, idx=args.num_envs * 2, render_mode="rgb_array"
@@ -185,7 +184,7 @@ def main(args: Args):
     wandb.init(project=args.wandb_project, notes=args.comment, group=config.group_name)
     config_for_wandb = {
         **args.__dict__,
-        "config": dict(args.config),
+        "config": dict(config),
     }
     wandb.config.update(config_for_wandb)
 
@@ -323,11 +322,6 @@ def main(args: Args):
                     )
                     os.makedirs(policy_folder, exist_ok=True)
 
-                    # Convert config to regular dict to avoid serialization issues
-                    config_dict = dict(
-                        args.config
-                    )  # Use dict() constructor for ConfigDict
-
                     # Convert flags to regular dict
                     flags_dict = {}
                     for key, value in args.__dict__.items():
@@ -355,7 +349,7 @@ def main(args: Args):
                         "target_critic_params": agent.target_critic,
                         "temp": agent.temp,
                         "rng": agent.rng,
-                        "config": config_dict,  # Save training configuration as regular dict
+                        "config": dict(config),
                         "training_flags": flags_dict,  # Save all training flags as regular dict
                     }
 
