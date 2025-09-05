@@ -1,28 +1,40 @@
-# RACER with Highway Environment
+# Highway-RACER
 
 <video src="results/best_policy_highway_eval_checkpoint_190000_episode_4.mp4" width="640" controls></video>
 
-This repository integrates RACER (Risk-sensitive Actor Critic with Epistemic Robustness) with a continuous-action highway-env to train a distributional SAC.
-The original RACER implementation from Kyle Stachowicz can be found at https://github.com/kylestach/epistemic-rl-release.
+A small research repository that integrates **RACER** (Risk-sensitive Actor Critic with Epistemic Robustness) with a continuous-action `highway-env` to train a distributional Soft Actor-Critic (SAC). The original RACER implementation by Kyle Stachowicz is available at: [https://github.com/kylestach/epistemic-rl-release](https://github.com/kylestach/epistemic-rl-release).
 
+---
 
-## Run training script
+## Setup
 
-Setup a virtual env (tested with python 3.11):
+* Python 3.11 (tested)
+* See `requirements.txt` for full dependency list
+
+Create and activate a virtual environment, then install the dependencies:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run training:
+---
+
+## Training
+
+Start training with the included script:
+
 ```bash
 python -m racer.scripts.train_highway
 ```
 
-You should see that the averaged speed reaches ~35 m/s at step 30k.
+During training you should observe that the **average speed** of the agent reaches approximately **35 m/s** by around **30k steps**.
 
-## Evaluation
+---
 
-Comparing standard SAC with the distributional SAC implementation from RACER shows better performance and training convergence.
+## Evaluation & results
+
+Comparing standard SAC with the RACER distributional SAC shows better performance and faster convergence for the distributional variant:
+
 ![Quantitative results](results/quantitative_evaluation.png)
