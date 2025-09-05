@@ -1,6 +1,6 @@
 # Highway-RACER
 
-<video src="results/best_policy_highway_eval_checkpoint_190000_episode_4.mp4" width="640" controls></video>
+https://github.com/user-attachments/assets/5bce1dfd-1b0d-4c43-a157-ac2dde5f58f0
 
 A research repository that integrates **RACER** (Risk-sensitive Actor Critic with Epistemic Robustness) with a continuous-action `highway-env` to train a distributional Soft Actor-Critic (SAC). The original RACER implementation by Kyle Stachowicz is available at: [https://github.com/kylestach/epistemic-rl-release](https://github.com/kylestach/epistemic-rl-release).
 
